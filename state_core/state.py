@@ -44,13 +44,15 @@ class State:
     
     def get_mu_identity_block(self) -> Optional[torch.Tensor]:
         """
-        Get MU Identity block (first 4 elements of semantic state).
-        Used by GraphBuilder for semantic similarity edges.
+        Get MU semantic state for graph similarity computation.
+        
+        FIXED: Now returns FULL 64D semantic state for proper similarity.
+        Previously returned only first 4D which threw away 94% of information.
         """
         if self.semantic_state is None:
             return None
-        # Identity block is first 4 dimensions (4 values in 8×8 matrix)
-        return self.semantic_state[..., :4]
+        # Return full semantic state for rich similarity computation
+        return self.semantic_state
     
     def get_attention_mask(self) -> Optional[torch.Tensor]:
         """Get attention mask from routing state."""

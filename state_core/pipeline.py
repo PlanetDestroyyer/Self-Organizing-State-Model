@@ -194,12 +194,15 @@ class StateCorePipeline(nn.Module):
         # === ADAPTERS ===
         
         # MU Adapter (always enabled) - pure semantic, NO positional encoding
+        # use_full_model=True enables 16-block attention (was False before)
         self.mu_adapter = MUAdapter(
             vocab_size=self.vocab_size,
             embed_dim=self.embed_dim,
             max_seq_len=self.max_seq_len,
             flatten_output=True,
-            use_full_model=mu_cfg.get('use_full_model', False)
+            use_full_model=mu_cfg.get('use_full_model', True),  # Now True by default!
+            n_layers=mu_cfg.get('mu_layers', 2),  # Number of block attention layers
+            dropout=model_cfg.get('dropout', 0.1)
         )
         
         # TEMPORAL Adapter (Stage 1+)
@@ -209,15 +212,16 @@ class StateCorePipeline(nn.Module):
             learning_mode=temporal_cfg.get('learning_mode', 'gradient')
         )
         
-        # Graph Builder (Stage 3) - uses MU Identity + positions
+        # Graph Builder (Stage 3) - uses MU semantic state + positions
         # NOTE: semantic_edges=True connects similar tokens for context
         # NOTE: random_shortcuts enables "small world" long-range connections
+        # FIXED: Lower threshold (0.2) for more edges, higher shortcuts (0.15)
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
-            enable_semantic=graph_cfg.get('semantic_edges', True),  # Was False - caused loops
-            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.05) > 0,
-            semantic_threshold=graph_cfg.get('semantic_threshold', 0.7),  # Tightened threshold
-            shortcut_prob=graph_cfg.get('random_shortcuts', 0.05)
+            enable_semantic=graph_cfg.get('semantic_edges', True),
+            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.15) > 0,
+            semantic_threshold=graph_cfg.get('semantic_threshold', 0.2),  # Was 0.7 - too strict!
+            shortcut_prob=graph_cfg.get('random_shortcuts', 0.15)  # Was 0.05 - too few!
         )
         self.graph_mask_converter = GraphMaskConverter()
         
