@@ -51,20 +51,32 @@ class TemporalAdapter(nn.Module):
             import importlib.util
             from pathlib import Path
             
-            # Search for time_embeddings.py in likely locations
-            project_root = Path(__file__).resolve().parent.parent.parent
-            possible_paths = [
-                project_root / "TEMPORAL" / "time_embeddings.py",
-                Path("TEMPORAL/time_embeddings.py").resolve(),
-                Path("/kaggle/working/Self-Organizing-State-Model/TEMPORAL/time_embeddings.py"),
-                Path("../TEMPORAL/time_embeddings.py").resolve()
-            ]
+            # Robust path search algorithm
+            current_file = Path(__file__).resolve()
+            search_start = current_file.parent
             
-            time_emb_file = None
-            for path in possible_paths:
-                if path.exists():
-                    time_emb_file = path
-                    break
+            possible_files = []
+            
+            # 1. Walk up to find repo root or TEMPORAL dir
+            temp_path = search_start
+            for _ in range(5):  # Go up 5 levels max
+                # Check for TEMPORAL directory
+                if (temp_path / "TEMPORAL" / "time_embeddings.py").exists():
+                    possible_files.append(temp_path / "TEMPORAL" / "time_embeddings.py")
+                # Check if we are inside TEMPORAL already
+                if temp_path.name == "TEMPORAL" and (temp_path / "time_embeddings.py").exists():
+                    possible_files.append(temp_path / "time_embeddings.py")
+                temp_path = temp_path.parent
+                
+            # 2. Add standard/environment-specific paths
+            env_paths = [
+                Path("/kaggle/working/Self-Organizing-State-Model/TEMPORAL/time_embeddings.py"),
+                Path("/content/Self-Organizing-State-Model/TEMPORAL/time_embeddings.py"),  # Colab
+                Path("TEMPORAL/time_embeddings.py").resolve(),
+            ]
+            possible_files.extend([p for p in env_paths if p.exists()])
+            
+            time_emb_file = possible_files[0] if possible_files else None
             
             if time_emb_file and time_emb_file.exists():
                 spec = importlib.util.spec_from_file_location("time_embeddings", str(time_emb_file))
@@ -81,7 +93,9 @@ class TemporalAdapter(nn.Module):
                 self._using_temporal = True
                 print(f"✓ TEMPORAL time embeddings loaded successfully from {time_emb_file}")
             else:
-                raise FileNotFoundError(f"time_embeddings.py not found in any standard location. Checked: {[str(p) for p in possible_paths]}")
+                # Debug info
+                cw = Path.cwd()
+                raise FileNotFoundError(f"time_embeddings.py not found. CWD: {cw}. Checked up to 5 levels up and standard env paths.")
         except Exception as e:
             print(f"Note: Using simple time embeddings (TEMPORAL import: {type(e).__name__}: {e})")
             self._using_temporal = False
