@@ -26,7 +26,7 @@ class MultiDomainDataset(Dataset):
     def __init__(
         self,
         domains: List[str] = None,
-        vocab_size: int = 50000,
+        vocab_size: int = 50257,
         seq_length: int = 64,
         split: str = 'train',
         max_samples_per_domain: int = None
@@ -218,7 +218,7 @@ class MultiDomainDataset(Dataset):
 
 def create_dataloaders(
     batch_size: int = 64,
-    vocab_size: int = 50000,
+    vocab_size: int = 50257,
     seq_length: int = 64,
     domains: List[str] = None
 ) -> Tuple[TorchDataLoader, TorchDataLoader]:
