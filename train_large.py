@@ -30,8 +30,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def get_args():
     parser = argparse.ArgumentParser(description='SOSM Large-Scale Training')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
+    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
     parser.add_argument('--seq-length', type=int, default=64, help='Sequence length')
+    parser.add_argument('--domain', type=str, default='wikitext', help='Domain: wikitext, code, scientific, or all')
     # MU requires 8x8=64 embed_dim (fixed structure)
     parser.add_argument('--embed-dim', type=int, default=64, help='MU embedding (must be 64 for 8x8)')
     parser.add_argument('--time-dim', type=int, default=64, help='TEMPORAL dimension')
@@ -187,14 +188,20 @@ def main():
     print(f"Attention Heads: {args.n_heads}")
     print()
     
+    # Domain selection
+    domains = None if args.domain == 'all' else [args.domain]
+    print(f"Domain: {args.domain}")
+    
     print("Loading datasets...")
     train_dataset = MultiDomainDataset(
+        domains=domains,
         split='train',
         seq_length=args.seq_length,
         max_samples_per_domain=5000 if args.quick else None
     )
     
     test_dataset = MultiDomainDataset(
+        domains=domains,
         split='test',
         seq_length=args.seq_length,
         max_samples_per_domain=1000 if args.quick else None
