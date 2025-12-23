@@ -47,10 +47,10 @@ class TemporalAdapter(nn.Module):
         
         # Try to import TEMPORAL's time embeddings
         try:
-            # Import from TEMPORAL module
+            # Import from TEMPORAL module - use absolute path
             import sys
             from pathlib import Path
-            temporal_path = Path(__file__).parent.parent.parent / "TEMPORAL" / "temporal_prototype"
+            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL" / "temporal_prototype").resolve()
             if str(temporal_path) not in sys.path:
                 sys.path.insert(0, str(temporal_path))
             
