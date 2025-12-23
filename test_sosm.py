@@ -157,7 +157,6 @@ def main():
     
     # Config
     BATCH_SIZE = args.batch_size
-    VOCAB_SIZE = 10000  # Smaller for testing
     SEQ_LEN = 64
     EPOCHS = args.epochs
     
@@ -165,11 +164,18 @@ def main():
     print("Loading datasets...")
     train_loader, test_loader = create_dataloaders(
         batch_size=BATCH_SIZE,
-        vocab_size=VOCAB_SIZE,
-        seq_length=SEQ_LEN,
+        max_seq_len=SEQ_LEN,
         domains=['wikitext', 'code', 'scientific']
     )
     print()
+    
+    # Get vocab size from dataset
+    vocab_info, _ = train_loader.dataset.get_vocab()
+    if isinstance(vocab_info, dict) and vocab_info.get('type') == 'bpe':
+        VOCAB_SIZE = vocab_info.get('vocab_size', 50257)  # Default GPT2 size
+        print(f"Using BPE Tokenizer (vocab={VOCAB_SIZE})")
+    else:
+        VOCAB_SIZE = len(vocab_info) if isinstance(vocab_info, dict) else 10000
     
     # Create SOSM pipeline
     print("Creating SOSM pipeline...")

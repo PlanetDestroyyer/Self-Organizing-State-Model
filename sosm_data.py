@@ -122,32 +122,38 @@ class MultiDomainDataset(Dataset):
         return samples
     
     def _build_shared_vocab(self):
-        """Build shared vocabulary from a fixed character set."""
+        """Initialize BPE tokenizer (GPT-2 style)."""
         global _SHARED_VOCAB
         
         if _SHARED_VOCAB is None:
-            # Use comprehensive character set that covers all domains
-            chars = (
-                " \t\n"  # Whitespace
-                "abcdefghijklmnopqrstuvwxyz"  # Lowercase
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # Uppercase
-                "0123456789"  # Digits
-                ".,;:!?'\"-()[]{}"  # Punctuation
-                "@#$%^&*+=<>/\\|`~_"  # Symbols (for code)
-                "àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"  # Extended Latin
-            )
-            char_to_idx = {c: i for i, c in enumerate(chars)}
-            idx_to_char = {i: c for c, i in char_to_idx.items()}
-            _SHARED_VOCAB = {'char_to_idx': char_to_idx, 'idx_to_char': idx_to_char}
-            print(f"  Built shared vocab: {len(chars)} chars")
+            try:
+                from transformers import GPT2TokenizerFast
+                tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+                tokenizer.pad_token = tokenizer.eos_token
+                _SHARED_VOCAB = {'tokenizer': tokenizer, 'type': 'bpe'}
+                print(f"  Using GPT-2 BPE tokenizer: {tokenizer.vocab_size} tokens")
+            except Exception as e:
+                print(f"  Warning: Could not load GPT-2 tokenizer ({e}), using fallback")
+                # Fallback to simple vocab
+                chars = " \t\n" + "abcdefghijklmnopqrstuvwxyz" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "0123456789" + ".,;:!?'\"-()[]{}"
+                char_to_idx = {c: i for i, c in enumerate(chars)}
+                idx_to_char = {i: c for c, i in char_to_idx.items()}
+                _SHARED_VOCAB = {'char_to_idx': char_to_idx, 'idx_to_char': idx_to_char, 'type': 'char'}
+                print(f"  Using fallback char vocab: {len(chars)} chars")
         
-        self.char_to_idx = _SHARED_VOCAB['char_to_idx']
-        self.idx_to_char = _SHARED_VOCAB['idx_to_char']
+        self._vocab = _SHARED_VOCAB
     
     def _tokenize_text(self, text: str) -> List[torch.Tensor]:
-        """Character-level tokenization using shared vocabulary."""
-        # Convert to token IDs using shared vocab
-        tokens = [self.char_to_idx.get(c, 0) for c in text]
+        """Tokenize text using BPE or character-level tokenizer."""
+        if self._vocab.get('type') == 'bpe':
+            tokenizer = self._vocab['tokenizer']
+            # Tokenize entire text
+            encoding = tokenizer.encode(text, add_special_tokens=False)
+            tokens = encoding
+        else:
+            # Fallback character-level
+            char_to_idx = self._vocab['char_to_idx']
+            tokens = [char_to_idx.get(c, 0) for c in text]
         
         # Create sequences
         samples = []
@@ -159,8 +165,21 @@ class MultiDomainDataset(Dataset):
         return samples
     
     def get_vocab(self) -> Tuple[dict, dict]:
-        """Get vocabulary mappings for saving with checkpoints."""
-        return self.char_to_idx, self.idx_to_char
+        """Get vocabulary info for saving with checkpoints."""
+        if self._vocab.get('type') == 'bpe':
+            tokenizer = self._vocab['tokenizer']
+            return {'type': 'bpe', 'name': 'gpt2'}, {'vocab_size': tokenizer.vocab_size}
+        else:
+            return self._vocab['char_to_idx'], self._vocab['idx_to_char']
+    
+    def decode(self, token_ids: List[int]) -> str:
+        """Decode token IDs back to text."""
+        if self._vocab.get('type') == 'bpe':
+            tokenizer = self._vocab['tokenizer']
+            return tokenizer.decode(token_ids)
+        else:
+            idx_to_char = self._vocab['idx_to_char']
+            return ''.join(idx_to_char.get(t, '?') for t in token_ids)
     
     def _generate_synthetic(self, domain: str, count: int) -> List[torch.Tensor]:
         """Generate synthetic data if real data unavailable."""
