@@ -59,8 +59,9 @@ def load_baseline(checkpoint_path: str = 'baseline_checkpoint.pt'):
 
 
 def generate(model, prompt_ids: list, max_tokens: int = 30, temperature: float = 0.8,
-             top_k: int = 40, vocab_size: int = 10000, is_sosm: bool = False):
-    """Generate text using temperature sampling."""
+             top_k: int = 40, vocab_size: int = 10000, is_sosm: bool = False,
+             repetition_penalty: float = 1.2):
+    """Generate text using temperature sampling with repetition penalty."""
     input_ids = prompt_ids.copy()
     
     with torch.no_grad():
@@ -74,9 +75,14 @@ def generate(model, prompt_ids: list, max_tokens: int = 30, temperature: float =
             
             next_logits = logits[0, -1, :] / temperature
             
+            # Apply repetition penalty
+            for prev_token in set(input_ids[-20:]):
+                if prev_token < len(next_logits):
+                    next_logits[prev_token] /= repetition_penalty
+            
             # Top-k sampling
             if top_k > 0:
-                values, _ = torch.topk(next_logits, top_k)
+                values, _ = torch.topk(next_logits, min(top_k, len(next_logits)))
                 next_logits[next_logits < values[-1]] = float('-inf')
             
             probs = F.softmax(next_logits, dim=-1)
@@ -84,6 +90,31 @@ def generate(model, prompt_ids: list, max_tokens: int = 30, temperature: float =
             input_ids.append(next_token)
     
     return input_ids
+
+
+def build_vocab_from_data():
+    """Rebuild vocabulary from training data (matches sosm_data.py)."""
+    try:
+        from datasets import load_dataset
+        
+        # Load WikiText (same as training)
+        ds = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
+        text = '\n'.join([t for t in ds['text'] if t.strip()])[:100000]  # First 100k chars
+        
+        # Build vocab same as sosm_data.py
+        chars = sorted(set(text))
+        char_to_idx = {c: i % 10000 for i, c in enumerate(chars)}
+        idx_to_char = {i: c for c, i in char_to_idx.items()}
+        
+        print(f"  Built vocab from WikiText: {len(chars)} unique chars")
+        return char_to_idx, idx_to_char
+    except Exception as e:
+        print(f"  Could not load WikiText: {e}")
+        # Fallback
+        chars = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n\t"
+        char_to_idx = {c: i for i, c in enumerate(chars)}
+        idx_to_char = {i: c for c, i in char_to_idx.items()}
+        return char_to_idx, idx_to_char
 
 
 def tokens_to_text(token_ids: list, idx_to_char: dict) -> str:
@@ -94,8 +125,9 @@ def tokens_to_text(token_ids: list, idx_to_char: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description='Text Generation Comparison')
     parser.add_argument('--prompt', type=str, default='The ', help='Starting prompt')
-    parser.add_argument('--max-tokens', type=int, default=50, help='Max tokens to generate')
-    parser.add_argument('--temperature', type=float, default=0.8, help='Sampling temperature')
+    parser.add_argument('--max-tokens', type=int, default=100, help='Max tokens to generate')
+    parser.add_argument('--temperature', type=float, default=0.9, help='Sampling temperature')
+    parser.add_argument('--top-k', type=int, default=50, help='Top-k sampling')
     args = parser.parse_args()
     
     print("=" * 70)
@@ -103,16 +135,17 @@ def main():
     print("=" * 70)
     print(f"Device: {device}")
     print(f"Prompt: '{args.prompt}'")
-    print(f"Max tokens: {args.max_tokens}")
+    print(f"Max tokens: {args.max_tokens}, Temperature: {args.temperature}")
     print()
     
-    # Build simple char-level vocab (same as training)
-    chars = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n"
-    char_to_idx = {c: i for i, c in enumerate(chars)}
-    idx_to_char = {i: c for c, i in char_to_idx.items()}
+    # Build vocabulary from training data
+    print("Building vocabulary from training data...")
+    char_to_idx, idx_to_char = build_vocab_from_data()
     
     # Tokenize prompt
     prompt_ids = [char_to_idx.get(c, 0) for c in args.prompt]
+    print(f"Prompt tokens: {prompt_ids[:10]}...")
+    print()
     
     # Load and generate with SOSM
     print("Loading SOSM model...")
@@ -121,8 +154,9 @@ def main():
         print(f"  ✓ Loaded (vocab={vocab_size})")
         
         print("\nGenerating with SOSM...")
-        sosm_ids = generate(sosm, prompt_ids, args.max_tokens, args.temperature, 
-                           vocab_size=vocab_size, is_sosm=True)
+        sosm_ids = generate(sosm, prompt_ids, args.max_tokens, args.temperature,
+                           top_k=args.top_k, vocab_size=vocab_size, is_sosm=True,
+                           repetition_penalty=1.3)
         sosm_text = tokens_to_text(sosm_ids, idx_to_char)
         print(f"\n📗 SOSM Output:\n{sosm_text}")
     except FileNotFoundError:
@@ -139,7 +173,8 @@ def main():
         
         print("\nGenerating with Baseline...")
         base_ids = generate(baseline, prompt_ids, args.max_tokens, args.temperature,
-                           vocab_size=vocab_size, is_sosm=False)
+                           top_k=args.top_k, vocab_size=vocab_size, is_sosm=False,
+                           repetition_penalty=1.3)
         base_text = tokens_to_text(base_ids, idx_to_char)
         print(f"\n📘 Baseline Output:\n{base_text}")
     except FileNotFoundError:
