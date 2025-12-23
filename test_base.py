@@ -147,17 +147,31 @@ def evaluate(model, loader):
     return avg_loss, perplexity
 
 
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Test Baseline Transformer')
+    parser.add_argument('--epochs', type=int, default=3, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
+    parser.add_argument('--seq-length', type=int, default=64, help='Sequence length')
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    
     print("=" * 70)
     print("BASELINE TRANSFORMER TEST")
     print("=" * 70)
     print(f"Device: {device}")
+    print(f"Epochs: {args.epochs}")
+    print(f"Batch Size: {args.batch_size}")
     print()
     
     # Config
-    BATCH_SIZE = 64
-    SEQ_LEN = 64
-    EPOCHS = 3
+    BATCH_SIZE = args.batch_size
+    SEQ_LEN = args.seq_length
+    EPOCHS = args.epochs
     
     # Load data
     print("Loading datasets...")
