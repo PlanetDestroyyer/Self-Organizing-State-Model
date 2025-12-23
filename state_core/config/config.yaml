@@ -1,0 +1,40 @@
+# State Core Configuration
+# No hard-coded flags - all toggleable via this file
+
+stage: 0  # 0=MU, 1=+TEMPORAL, 2=+K-1, 3=+Graph
+
+components:
+  mu:
+    enabled: true
+    vocab_size: 50000
+    embed_dim: 64  # 8x8 matrix
+    max_seq_len: 512
+    use_full_model: false
+
+  temporal:
+    enabled: false
+    time_dim: 32
+    learning_mode: gradient  # 'gradient' or 'hybrid'
+
+  k1:
+    enabled: false
+    use_hierarchical_tree: false
+
+  graph:
+    enabled: false
+    sequential_edges: true
+    semantic_edges: false
+    semantic_threshold: 0.5
+    random_shortcuts: 0.0
+
+model:
+  hidden_dim: 256
+  n_layers: 6
+  n_heads: 4
+  dropout: 0.1
+
+logging:
+  log_loss: true
+  log_graph_size: true
+  log_k1_updates: true
+  log_interval: 100

@@ -1,0 +1,118 @@
+"""
+MU Adapter - Wraps MU semantic representation.
+
+Imports MU exactly as implemented, outputs 8×8 semantic matrices.
+Does NOT alter MU internals.
+"""
+
+import sys
+from pathlib import Path
+import torch
+import torch.nn as nn
+from typing import Optional
+
+# Add MU repo to path
+MU_PATH = Path(__file__).parent.parent.parent / "MU"
+if str(MU_PATH) not in sys.path:
+    sys.path.insert(0, str(MU_PATH))
+
+
+class MUAdapter(nn.Module):
+    """
+    Adapter for MU semantic representation.
+    
+    Wraps MU's embedding and optionally transformer layers.
+    Output: 8×8 semantic matrices [B, T, 8, 8] or flattened [B, T, 64]
+    """
+    
+    def __init__(
+        self,
+        vocab_size: int = 50000,
+        embed_dim: int = 64,  # 8x8 = 64
+        max_seq_len: int = 512,
+        flatten_output: bool = True,
+        use_full_model: bool = False
+    ):
+        """
+        Initialize MU adapter.
+        
+        Args:
+            vocab_size: Vocabulary size
+            embed_dim: Embedding dimension (64 for 8x8 matrix)
+            max_seq_len: Maximum sequence length
+            flatten_output: If True, output [B, T, 64], else [B, T, 8, 8]
+            use_full_model: If True, use full MUSOTATransformer
+        """
+        super().__init__()
+        
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.flatten_output = flatten_output
+        self.use_full_model = use_full_model
+        
+        if use_full_model:
+            # Import and use full MU transformer
+            try:
+                from mu_sota import MUSOTATransformer, MUSOTAConfig
+                config = MUSOTAConfig()
+                config.vocab_size = vocab_size
+                config.max_seq_len = max_seq_len
+                self.mu_model = MUSOTATransformer(config)
+                self._full_model = True
+            except ImportError as e:
+                print(f"Warning: Could not import MU model: {e}")
+                print("Falling back to simple embedding")
+                self._full_model = False
+                self._init_simple_embedding(vocab_size, embed_dim, max_seq_len)
+        else:
+            self._full_model = False
+            self._init_simple_embedding(vocab_size, embed_dim, max_seq_len)
+    
+    def _init_simple_embedding(self, vocab_size, embed_dim, max_seq_len):
+        """Initialize simple semantic embedding (MU-style)."""
+        # Token to 8x8 semantic matrix
+        self.token_to_mu = nn.Embedding(vocab_size, embed_dim)
+        
+        # Positional encoding
+        self.pos_encoding = nn.Parameter(
+            torch.randn(1, max_seq_len, embed_dim) * 0.02
+        )
+        
+        # Initialize
+        nn.init.normal_(self.token_to_mu.weight, mean=0.0, std=0.02)
+    
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Get semantic state from token IDs.
+        
+        Args:
+            token_ids: [B, T] token indices
+            
+        Returns:
+            semantic_state: [B, T, 64] or [B, T, 8, 8]
+        """
+        if self._full_model:
+            # Use full MU transformer
+            logits = self.mu_model(token_ids)
+            # Note: This returns logits, not embeddings
+            # For semantic state, we'd need to access internal representations
+            # For now, just use the embedding layer
+            M = self.mu_model.token_to_mu(token_ids)
+            T = token_ids.shape[1]
+            M = M + self.mu_model.pos_encoding[:, :T, :]
+        else:
+            # Simple embedding
+            B, T = token_ids.shape
+            M = self.token_to_mu(token_ids)  # [B, T, 64]
+            M = M + self.pos_encoding[:, :T, :]
+        
+        # Reshape to 8x8 if requested
+        if not self.flatten_output:
+            B, T = M.shape[:2]
+            M = M.view(B, T, 8, 8)
+        
+        return M
+    
+    def get_vocab_size(self) -> int:
+        """Get vocabulary size."""
+        return self.vocab_size

@@ -1,0 +1,113 @@
+"""
+TEMPORAL Adapter - Wraps TEMPORAL time embeddings.
+
+Imports TEMPORAL exactly as implemented, injects time embeddings.
+Ensures gradients flow through time embeddings.
+Does NOT alter TEMPORAL internals.
+"""
+
+import sys
+from pathlib import Path
+import torch
+import torch.nn as nn
+from typing import Optional
+
+# Add TEMPORAL repo to path
+TEMPORAL_PATH = Path(__file__).parent.parent.parent / "TEMPORAL" / "temporal_prototype"
+if str(TEMPORAL_PATH) not in sys.path:
+    sys.path.insert(0, str(TEMPORAL_PATH))
+
+
+class TemporalAdapter(nn.Module):
+    """
+    Adapter for TEMPORAL time embeddings.
+    
+    Wraps TEMPORAL's time embedding layer, augments semantic state.
+    Ensures time embeddings have requires_grad=True.
+    """
+    
+    def __init__(
+        self,
+        vocab_size: int = 50000,
+        time_dim: int = 32,
+        learning_mode: str = 'gradient'
+    ):
+        """
+        Initialize TEMPORAL adapter.
+        
+        Args:
+            vocab_size: Vocabulary size
+            time_dim: Time embedding dimension
+            learning_mode: 'gradient' or 'hybrid'
+        """
+        super().__init__()
+        
+        self.vocab_size = vocab_size
+        self.time_dim = time_dim
+        
+        # Try to import TEMPORAL's time embeddings
+        try:
+            from time_embeddings import Temporal_TimeEmbeddings
+            self.time_embeddings = Temporal_TimeEmbeddings(
+                vocab_size=vocab_size,
+                time_dim=time_dim,
+                learning_mode=learning_mode
+            )
+            self._using_temporal = True
+        except ImportError as e:
+            print(f"Warning: Could not import TEMPORAL: {e}")
+            print("Falling back to simple time embeddings")
+            self._using_temporal = False
+            self._init_simple_time_embeddings(vocab_size, time_dim)
+    
+    def _init_simple_time_embeddings(self, vocab_size: int, time_dim: int):
+        """Initialize simple time embeddings (TEMPORAL-style)."""
+        # Time embeddings - initialized to zeros, learns from scratch
+        self.time_embeddings_param = nn.Parameter(
+            torch.zeros(vocab_size, time_dim),
+            requires_grad=True  # Gradients flow through
+        )
+    
+    def forward(
+        self,
+        token_ids: torch.Tensor,
+        semantic_state: Optional[torch.Tensor] = None,
+        update_time: bool = False
+    ) -> torch.Tensor:
+        """
+        Get time embeddings and optionally combine with semantic state.
+        
+        Args:
+            token_ids: [B, T] token indices
+            semantic_state: [B, T, semantic_dim] optional semantic state
+            update_time: Whether to update time statistics
+            
+        Returns:
+            temporal_state: [B, T, time_dim] or combined [B, T, semantic_dim + time_dim]
+        """
+        if self._using_temporal:
+            time_emb = self.time_embeddings(
+                token_ids,
+                update_time=update_time
+            )
+        else:
+            time_emb = self.time_embeddings_param[token_ids]
+        
+        # Combine with semantic state if provided
+        if semantic_state is not None:
+            return torch.cat([semantic_state, time_emb], dim=-1)
+        
+        return time_emb
+    
+    def get_time_dim(self) -> int:
+        """Get time embedding dimension."""
+        return self.time_dim
+    
+    def verify_gradient_flow(self) -> bool:
+        """Verify that time embeddings have gradients enabled."""
+        if self._using_temporal:
+            param = self.time_embeddings.time_embeddings
+        else:
+            param = self.time_embeddings_param
+        
+        return param.requires_grad and param.is_leaf
