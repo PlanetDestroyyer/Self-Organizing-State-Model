@@ -2,11 +2,6 @@
 """
 SOSM Large-Scale Training Script (100M+ Parameters)
 
-Trains SOSM with:
-- Large model (100M+ params)
-- 50 epochs with checkpointing
-- Built-in generation test
-
 Usage:
     python train_large.py --epochs 50
     python train_large.py --epochs 10 --quick
@@ -37,27 +32,27 @@ def get_args():
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--seq-length', type=int, default=64, help='Sequence length')
-    # Increased for 100M+ params
-    parser.add_argument('--model-dim', type=int, default=512, help='Model hidden dimension')
-    parser.add_argument('--embed-dim', type=int, default=256, help='MU embedding dimension')
-    parser.add_argument('--time-dim', type=int, default=128, help='TEMPORAL dimension')
+    # MU requires 8x8=64 embed_dim (fixed structure)
+    parser.add_argument('--embed-dim', type=int, default=64, help='MU embedding (must be 64 for 8x8)')
+    parser.add_argument('--time-dim', type=int, default=64, help='TEMPORAL dimension')
+    # Increase these for 100M+
+    parser.add_argument('--model-dim', type=int, default=768, help='Model hidden dimension')
     parser.add_argument('--mu-layers', type=int, default=6, help='Number of MU block-attention layers')
     parser.add_argument('--n-layers', type=int, default=12, help='Number of transformer layers')
-    parser.add_argument('--n-heads', type=int, default=8, help='Number of attention heads')
+    parser.add_argument('--n-heads', type=int, default=12, help='Number of attention heads')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
-    parser.add_argument('--checkpoint-every', type=int, default=10, help='Save checkpoint every N epochs')
-    parser.add_argument('--quick', action='store_true', help='Quick test mode (smaller dataset)')
+    parser.add_argument('--checkpoint-every', type=int, default=10, help='Save every N epochs')
+    parser.add_argument('--quick', action='store_true', help='Quick test mode')
     return parser.parse_args()
 
 
 def create_sosm(args, vocab_size):
-    """Create SOSM with 100M+ configuration."""
     config = {
         'stage': 3,
         'components': {
             'mu': {
                 'vocab_size': vocab_size,
-                'embed_dim': args.embed_dim,
+                'embed_dim': args.embed_dim,  # Must be 64 for 8x8 structure
                 'max_seq_len': args.seq_length,
                 'use_full_model': True,
                 'mu_layers': args.mu_layers,
@@ -87,7 +82,6 @@ def create_sosm(args, vocab_size):
 
 
 def train_epoch(model, dataloader, optimizer, epoch):
-    """Train for one epoch."""
     model.train()
     total_loss = 0
     total_batches = 0
@@ -95,9 +89,8 @@ def train_epoch(model, dataloader, optimizer, epoch):
     start_time = time.time()
     
     for batch_idx, batch in enumerate(dataloader):
-        # Dataset returns (x, y, domain) - unpack correctly
         if len(batch) == 3:
-            x, y, _ = batch  # Ignore domain
+            x, y, _ = batch
         else:
             x, y = batch
         
@@ -118,13 +111,12 @@ def train_epoch(model, dataloader, optimizer, epoch):
             elapsed = time.time() - start_time
             speed = (batch_idx + 1) / elapsed if elapsed > 0 else 0
             edges = state.routing_state.get('num_edges', 0) if state.routing_state else 0
-            print(f"  Batch {batch_idx}/{len(dataloader)}: loss={loss.item():.4f}, edges={edges}, speed={speed:.1f} batch/s")
+            print(f"  Batch {batch_idx}/{len(dataloader)}: loss={loss.item():.4f}, edges={edges}, speed={speed:.1f} b/s")
     
     return total_loss / total_batches
 
 
 def evaluate(model, dataloader):
-    """Evaluate model."""
     model.eval()
     total_loss = 0
     total_batches = 0
@@ -149,7 +141,6 @@ def evaluate(model, dataloader):
 
 
 def generate_samples(model, tokenizer, prompts, max_tokens=50):
-    """Generate text samples."""
     model.eval()
     results = []
     
@@ -164,12 +155,10 @@ def generate_samples(model, tokenizer, prompts, max_tokens=50):
                 
                 next_logits = logits[0, -1, :] / 0.3
                 
-                # Strong repetition penalty
                 for token in input_ids[-30:]:
                     if token < len(next_logits):
                         next_logits[token] /= 4.0
                 
-                # Top-k
                 values, _ = torch.topk(next_logits, min(10, len(next_logits)))
                 next_logits[next_logits < values[-1]] = float('-inf')
                 
@@ -186,19 +175,18 @@ def main():
     args = get_args()
     
     print("=" * 70)
-    print("SOSM LARGE-SCALE TRAINING (100M+ Target)")
+    print("SOSM LARGE-SCALE TRAINING")
     print("=" * 70)
     print(f"Device: {device}")
     print(f"Epochs: {args.epochs}")
     print(f"Model Dim: {args.model_dim}")
-    print(f"Embed Dim: {args.embed_dim}")
+    print(f"Embed Dim: {args.embed_dim} (8x8 MU structure)")
     print(f"Time Dim: {args.time_dim}")
     print(f"MU Layers: {args.mu_layers}")
     print(f"Transformer Layers: {args.n_layers}")
     print(f"Attention Heads: {args.n_heads}")
     print()
     
-    # Load data
     print("Loading datasets...")
     train_dataset = MultiDomainDataset(
         split='train',
@@ -218,30 +206,22 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=0)
     
-    # Tokenizer for generation
     try:
         from transformers import GPT2TokenizerFast
         tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     except:
         tokenizer = None
     
-    # Create model
     print("\nCreating SOSM...")
     model, config = create_sosm(args, vocab_size)
     params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {params / 1e6:.1f}M")
-    
-    if params < 100_000_000:
-        print(f"⚠️  Model is {params/1e6:.1f}M params, below 100M target")
-    else:
-        print(f"✓ Model meets 100M+ target")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     best_ppl = float('inf')
     
-    # Training loop
     print("\n" + "-" * 70)
     print("TRAINING")
     print("-" * 70)
@@ -257,7 +237,6 @@ def main():
         print(f"  Test Loss: {test_loss:.4f}")
         print(f"  Perplexity: {ppl:.2f}")
         
-        # Save checkpoint
         if epoch % args.checkpoint_every == 0 or ppl < best_ppl:
             if ppl < best_ppl:
                 best_ppl = ppl
@@ -274,7 +253,6 @@ def main():
             }, name)
             print(f"  ✓ Saved: {name}")
         
-        # Generate samples every 10 epochs
         if epoch % 10 == 0 and tokenizer:
             print("\n  Generation Test:")
             prompts = ["The capital of India is", "Once upon a time"]
@@ -282,7 +260,6 @@ def main():
             for p, s in zip(prompts, samples):
                 print(f"    '{p}' → {s[:80]}...")
     
-    # Final test
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE")
     print("=" * 70)
@@ -290,7 +267,7 @@ def main():
     
     if tokenizer:
         print("\nFinal Generation:")
-        prompts = ["The capital of India is", "The future of AI", "Once upon a time", "def factorial(n):"]
+        prompts = ["The capital of India is", "The future of AI", "Once upon a time"]
         samples = generate_samples(model, tokenizer, prompts)
         for p, s in zip(prompts, samples):
             print(f"  '{p}' → {s[:120]}")
