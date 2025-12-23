@@ -28,7 +28,13 @@ import torch.nn.functional as F
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+PROJECT_ROOT = Path(__file__).parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Add TEMPORAL to path for proper imports
+TEMPORAL_PATH = PROJECT_ROOT / "TEMPORAL"
+if str(TEMPORAL_PATH) not in sys.path:
+    sys.path.insert(0, str(TEMPORAL_PATH))
 
 from sosm_data import create_dataloaders
 from state_core import StateCorePipeline
