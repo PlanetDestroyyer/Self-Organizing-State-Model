@@ -47,23 +47,30 @@ class TemporalAdapter(nn.Module):
         
         # Try to import TEMPORAL's time embeddings
         try:
-            # Import from TEMPORAL module - use absolute path
-            import sys
+            # Import from TEMPORAL module using importlib for reliable loading
+            import importlib.util
             from pathlib import Path
-            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL").resolve()
-            if str(temporal_path) not in sys.path:
-                sys.path.insert(0, str(temporal_path))
             
-            from time_embeddings import Temporal_TimeEmbeddings
-            self.time_embeddings = Temporal_TimeEmbeddings(
-                vocab_size=vocab_size,
-                time_dim=time_dim,
-                learning_mode=learning_mode
-            )
-            self._using_temporal = True
-            print("✓ TEMPORAL time embeddings loaded successfully")
+            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL").resolve()
+            time_emb_file = temporal_path / "time_embeddings.py"
+            
+            if time_emb_file.exists():
+                spec = importlib.util.spec_from_file_location("time_embeddings", time_emb_file)
+                time_embeddings_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(time_embeddings_module)
+                
+                Temporal_TimeEmbeddings = time_embeddings_module.Temporal_TimeEmbeddings
+                self.time_embeddings = Temporal_TimeEmbeddings(
+                    vocab_size=vocab_size,
+                    time_dim=time_dim,
+                    learning_mode=learning_mode
+                )
+                self._using_temporal = True
+                print("✓ TEMPORAL time embeddings loaded successfully")
+            else:
+                raise FileNotFoundError(f"time_embeddings.py not found at {time_emb_file}")
         except Exception as e:
-            print(f"Note: Using simple time embeddings (TEMPORAL import: {type(e).__name__})")
+            print(f"Note: Using simple time embeddings (TEMPORAL import: {type(e).__name__}: {e})")
             self._using_temporal = False
             self._init_simple_time_embeddings(vocab_size, time_dim)
     
