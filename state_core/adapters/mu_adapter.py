@@ -69,14 +69,18 @@ class MUAdapter(nn.Module):
             self._init_simple_embedding(vocab_size, embed_dim, max_seq_len)
     
     def _init_simple_embedding(self, vocab_size, embed_dim, max_seq_len):
-        """Initialize simple semantic embedding (MU-style)."""
-        # Token to 8x8 semantic matrix
+        """
+        Initialize simple semantic embedding (MU-style).
+        
+        NOTE: Semantic identity must remain invariant to sequence position.
+        Positional information is tracked separately in State.position_indices
+        and handled by TEMPORAL, NOT by MU.
+        """
+        # Token to 8x8 semantic matrix - pure semantic identity
         self.token_to_mu = nn.Embedding(vocab_size, embed_dim)
         
-        # Positional encoding
-        self.pos_encoding = nn.Parameter(
-            torch.randn(1, max_seq_len, embed_dim) * 0.02
-        )
+        # NO positional encoding - semantic identity is position-invariant
+        # Position is temporal/structural, not semantic
         
         # Initialize
         nn.init.normal_(self.token_to_mu.weight, mean=0.0, std=0.02)
@@ -85,6 +89,9 @@ class MUAdapter(nn.Module):
         """
         Get semantic state from token IDs.
         
+        IMPORTANT: This returns PURE semantic identity without positional
+        encoding. Semantic meaning does NOT depend on sequence position.
+        
         Args:
             token_ids: [B, T] token indices
             
@@ -92,19 +99,13 @@ class MUAdapter(nn.Module):
             semantic_state: [B, T, 64] or [B, T, 8, 8]
         """
         if self._full_model:
-            # Use full MU transformer
-            logits = self.mu_model(token_ids)
-            # Note: This returns logits, not embeddings
-            # For semantic state, we'd need to access internal representations
-            # For now, just use the embedding layer
+            # Use full MU transformer (semantic only, no position)
             M = self.mu_model.token_to_mu(token_ids)
-            T = token_ids.shape[1]
-            M = M + self.mu_model.pos_encoding[:, :T, :]
+            # NOTE: Do NOT add positional encoding from MU model
         else:
-            # Simple embedding
-            B, T = token_ids.shape
+            # Simple embedding - pure semantic identity
             M = self.token_to_mu(token_ids)  # [B, T, 64]
-            M = M + self.pos_encoding[:, :T, :]
+            # NO positional encoding added
         
         # Reshape to 8x8 if requested
         if not self.flatten_output:

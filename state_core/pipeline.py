@@ -3,6 +3,12 @@ State Core Pipeline - Main execution pipeline.
 
 Defines exact execution order for forward and backward passes.
 Orchestrates all adapters based on current stage.
+
+DESIGN PRINCIPLES:
+- Transformer layers are "State Update Operators" - computation primitives
+- Semantic and temporal states remain SEPARATE in State object
+- Graph routing uses MU Identity block + positions only
+- Position is tracked explicitly, not embedded
 """
 
 import torch
@@ -17,13 +23,34 @@ from .graph import GraphBuilder, GraphMaskConverter
 from .config import load_config, get_default_config
 
 
-class TransformerLayer(nn.Module):
-    """Simple transformer layer for the state core pipeline."""
+class StateUpdateOperator(nn.Module):
+    """
+    Computation operator that updates State under constraints.
+    
+    This is NOT a Transformer layer in the architectural sense. It uses
+    attention mechanics as a computational primitive to update state, but:
+    
+    WHAT IT DOES:
+    - Projects semantic + temporal states into computation space
+    - Applies attention under graph routing constraints
+    - Updates state representation via gated residuals
+    
+    WHAT IT DOES NOT DO:
+    - Define the model architecture (State does)
+    - Learn positional patterns (TEMPORAL does)
+    - Modify semantic identity (MU is position-invariant)
+    - Access embeddings directly (only projected state)
+    """
     
     def __init__(self, dim: int, n_heads: int, ff_dim: int, dropout: float = 0.1):
         super().__init__()
+        self.dim = dim
+        
+        # Pre-norm attention
         self.norm1 = nn.LayerNorm(dim)
         self.attn = nn.MultiheadAttention(dim, n_heads, dropout=dropout, batch_first=True)
+        
+        # Pre-norm feed-forward
         self.norm2 = nn.LayerNorm(dim)
         self.ff = nn.Sequential(
             nn.Linear(dim, ff_dim),
@@ -32,15 +59,31 @@ class TransformerLayer(nn.Module):
             nn.Linear(ff_dim, dim),
             nn.Dropout(dropout)
         )
+        
+        # Gated residual (learnable gate for controlled updates)
+        self.gate = nn.Parameter(torch.ones(1) * 0.1)
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Self-attention with optional mask
+        """
+        Update state representation.
+        
+        Args:
+            x: Projected state [B, T, dim]
+            mask: Attention mask from graph routing (None = unrestricted)
+            
+        Returns:
+            Updated state representation [B, T, dim]
+        """
+        # Self-attention with optional graph mask
         normed = self.norm1(x)
         if mask is not None:
             attn_out, _ = self.attn(normed, normed, normed, attn_mask=mask)
         else:
+            # Unrestricted attention (graph disabled)
             attn_out, _ = self.attn(normed, normed, normed)
-        x = x + attn_out
+        
+        # Gated residual (controlled state update)
+        x = x + self.gate * attn_out
         
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -51,18 +94,24 @@ class StateCorePipeline(nn.Module):
     """
     Main execution pipeline for the Self-Organizing State Model.
     
-    Forward pass:
-        1. Token IDs → MU Adapter → semantic_state
-        2. (Stage 1+) TEMPORAL Adapter → temporal_state
-        3. (Stage 3) Graph Builder → routing_state
-        4. Attention layers with routing mask
-        5. Output logits
+    CORRECT EXECUTION FLOW:
     
-    Backward pass:
-        1. Compute loss
-        2. Backprop normally
-        3. (Stage 2+) K-1 Adapter intercepts gradients
-        4. Apply selective updates
+    1. Input: token_ids + sequence indices
+    2. Semantic State (MU): token_id → 8×8 semantic matrix (NO positional encoding)
+    3. Temporal State (TEMPORAL): (token_id, position) → temporal embedding
+    4. State Assembly: State { semantic_state, temporal_state, position_indices }
+    5. Graph Construction: Input = MU Identity block + positions → adjacency + mask
+    6. State Update Operators: Project state → compute → update via gated residuals
+    7. Output Projection: State → logits
+    8. Loss: Cross entropy
+    9. Backward: Compute gradients
+    10. K-1 Responsibility: Trace gradients hierarchically, scale updates
+    11. Parameter Update: optimizer.step()
+    
+    TOGGLE BEHAVIOR:
+    - Graph OFF → unrestricted attention
+    - TEMPORAL OFF → no time dependence
+    - K-1 OFF → standard backprop
     """
     
     def __init__(self, config: Dict[str, Any] = None):
@@ -78,7 +127,6 @@ class StateCorePipeline(nn.Module):
         if config is None:
             config = load_config()
         elif isinstance(config, int):
-            # If just stage number passed
             config = get_default_config()
             config['stage'] = config
         
@@ -97,18 +145,18 @@ class StateCorePipeline(nn.Module):
         
         # Vocab and dimensions
         self.vocab_size = mu_cfg.get('vocab_size', 50000)
-        self.embed_dim = mu_cfg.get('embed_dim', 64)
-        self.time_dim = temporal_cfg.get('time_dim', 32)
+        self.embed_dim = mu_cfg.get('embed_dim', 64)  # MU semantic dimension
+        self.time_dim = temporal_cfg.get('time_dim', 32)  # TEMPORAL dimension
         self.max_seq_len = mu_cfg.get('max_seq_len', 512)
         
-        # Compute model dimension
+        # Compute model dimension (semantic + temporal if enabled)
         self.model_dim = self.embed_dim
         if self.stage_controller.temporal_enabled:
             self.model_dim += self.time_dim
         
         # === ADAPTERS ===
         
-        # MU Adapter (always enabled)
+        # MU Adapter (always enabled) - pure semantic, NO positional encoding
         self.mu_adapter = MUAdapter(
             vocab_size=self.vocab_size,
             embed_dim=self.embed_dim,
@@ -124,7 +172,7 @@ class StateCorePipeline(nn.Module):
             learning_mode=temporal_cfg.get('learning_mode', 'gradient')
         )
         
-        # Graph Builder (Stage 3)
+        # Graph Builder (Stage 3) - uses MU Identity + positions ONLY
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
             enable_semantic=graph_cfg.get('semantic_edges', False),
@@ -134,18 +182,18 @@ class StateCorePipeline(nn.Module):
         )
         self.graph_mask_converter = GraphMaskConverter()
         
-        # === TRANSFORMER LAYERS ===
+        # === STATE UPDATE OPERATORS ===
         hidden_dim = model_cfg.get('hidden_dim', 256)
         n_layers = model_cfg.get('n_layers', 6)
         n_heads = model_cfg.get('n_heads', 4)
         dropout = model_cfg.get('dropout', 0.1)
         
-        # Input projection (adapts to varying input dim based on stage)
+        # Input projection (semantic + temporal → computation space)
         self.input_proj = nn.Linear(self.model_dim, hidden_dim)
         
-        # Transformer layers
-        self.layers = nn.ModuleList([
-            TransformerLayer(hidden_dim, n_heads, hidden_dim * 4, dropout)
+        # State Update Operators (NOT Transformer layers)
+        self.operators = nn.ModuleList([
+            StateUpdateOperator(hidden_dim, n_heads, hidden_dim * 4, dropout)
             for _ in range(n_layers)
         ])
         
@@ -174,6 +222,14 @@ class StateCorePipeline(nn.Module):
         """
         Forward pass through the pipeline.
         
+        EXECUTION ORDER:
+        1. MU → semantic_state (position-invariant)
+        2. TEMPORAL → temporal_state (if enabled)
+        3. State Assembly (semantic + temporal + positions, kept SEPARATE)
+        4. Graph Construction (uses MU Identity + positions)
+        5. State Update Operators (project, compute, update)
+        6. Output projection → logits
+        
         Args:
             token_ids: [B, T] token indices
             return_state: Whether to return State object
@@ -183,33 +239,44 @@ class StateCorePipeline(nn.Module):
             state: State object (if return_state=True)
         """
         B, T = token_ids.shape
-        state = State()
+        device = token_ids.device
         
-        # === Stage 0+: MU Semantic State ===
+        # Initialize State with explicit position tracking
+        state = State()
+        state.position_indices = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)
+        
+        # === Step 1: MU Semantic State (position-invariant) ===
         state.semantic_state = self.mu_adapter(token_ids)  # [B, T, 64]
         
-        # === Stage 1+: TEMPORAL Time State ===
+        # === Step 2: TEMPORAL Time State (if enabled) ===
         if self.stage_controller.temporal_enabled:
             state.temporal_state = self.temporal_adapter(
                 token_ids,
-                semantic_state=None,  # Don't combine yet
+                semantic_state=None,  # No semantic mixing
                 update_time=self.training
             )
-            # Combine for model input
-            embeddings = torch.cat([state.semantic_state, state.temporal_state], dim=-1)
-        else:
-            embeddings = state.semantic_state
         
-        # === Stage 3: Graph Routing ===
+        # === Step 3: Prepare for computation (internal projection) ===
+        # NOTE: We concatenate ONLY for the State Update Operators
+        # The State object still keeps them separate
+        if state.temporal_state is not None:
+            operator_input = torch.cat([state.semantic_state, state.temporal_state], dim=-1)
+        else:
+            operator_input = state.semantic_state
+        
+        # === Step 4: Graph Construction (uses MU Identity + positions) ===
         attention_mask = None
         if self.stage_controller.graph_enabled:
+            # Get MU Identity block for semantic similarity
+            mu_identity = state.get_mu_identity_block()  # [B, T, 4]
+            
             graph = self.graph_builder.build_graph(
                 seq_len=T,
-                semantic_state=state.semantic_state,
+                semantic_state=mu_identity,  # Only Identity block
                 batch_size=B
             )
             attention_mask = self.graph_mask_converter.convert_to_additive(
-                graph, device=token_ids.device
+                graph, device=device
             )
             state.routing_state = {
                 'graph': graph,
@@ -217,12 +284,13 @@ class StateCorePipeline(nn.Module):
                 'num_edges': graph['num_edges']
             }
         
-        # === Transformer Forward ===
-        h = self.input_proj(embeddings)
+        # === Step 5: State Update Operators ===
+        h = self.input_proj(operator_input)
         
-        for layer in self.layers:
-            h = layer(h, attention_mask)
+        for operator in self.operators:
+            h = operator(h, attention_mask)
         
+        # === Step 6: Output Projection ===
         h = self.output_norm(h)
         logits = self.output_proj(h)
         
@@ -265,12 +333,16 @@ class StateCorePipeline(nn.Module):
         """
         Change current stage.
         
-        Note: May require re-initializing model if dimensions change.
+        TOGGLE BEHAVIOR:
+        - Stage 0: MU only
+        - Stage 1: MU + TEMPORAL (adds time dependence)
+        - Stage 2: MU + TEMPORAL + K-1 (hierarchical attribution)
+        - Stage 3: Full system with graph routing
         """
         old_stage = self.stage_controller.stage
         self.stage_controller.set_stage(stage)
         
-        # Update model dimension if TEMPORAL toggled
+        # Warn if dimension changes
         if (old_stage < 1 <= stage) or (old_stage >= 1 > stage):
             print(f"Warning: Stage change affects model dimension. "
                   f"Re-initialize pipeline for proper dimension handling.")
