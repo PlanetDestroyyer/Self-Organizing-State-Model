@@ -1,0 +1,178 @@
+{
+  "system": {
+    "name": "Self-Learning K-1 System",
+    "phase_1_duration": 999999999,
+    "description": "Phase 1 only - gradient-based agent selection (Phase 2 disabled)"
+  },
+  "model": {
+    "input_dim": 128,
+    "hidden_dim": 256,
+    "output_dim": 128,
+    "vocab_size": 10000,
+    "embed_dim": 128,
+    "max_seq_len": 64,
+    "num_heads": 4,
+    "tree_depth": 4,
+    "branching_factor": [
+      4,
+      3,
+      2
+    ]
+  },
+  "hierarchy": {
+    "num_domains": 5,
+    "agents_per_domain": 5,
+    "sub_agents_per_agent": 4,
+    "depth": 4,
+    "branching_factor": 5,
+    "agents_per_level": [
+      1,
+      5,
+      25,
+      100
+    ]
+  },
+  "trust": {
+    "initial": 0.3,
+    "deletion_threshold": 0.2,
+    "cache_threshold": 0.7,
+    "error_penalty_multiplier": 0.9,
+    "success_reward_multiplier": 0.5,
+    "success_reward_cap": 0.3,
+    "decay_rate": 0.01,
+    "min_trust": 0.0,
+    "max_trust": 1.0
+  },
+  "structure": {
+    "min_agents_per_manager": 3,
+    "max_total_agents": 1000,
+    "max_agents_per_manager": 50,
+    "max_hierarchy_depth": 6,
+    "routing_confidence_threshold": 0.3,
+    "exploration_rate": 0.3
+  },
+  "learning": {
+    "top_k": 5,
+    "top_k_min": 10,
+    "top_k_max": 20,
+    "learning_rate": 0.001,
+    "batch_size": 512,
+    "gradient_clip": 1.0,
+    "log_interval": 5000,
+    "validation_interval": 10000,
+    "accumulation_steps": 1,
+    "prefetch_batches": 4
+  },
+  "selection": {
+    "gradient_weight": 0.4,
+    "trust_weight": 0.3,
+    "diversity_weight": 0.3,
+    "diversity_window": 100
+  },
+  "trust_update": {
+    "gradient_scale": 0.5,
+    "max_update": 0.1,
+    "penalty_ratio": 0.5
+  },
+  "adaptation": {
+    "plateau_loss_std": 0.05,
+    "plateau_loss_trend": 0.1,
+    "instability_std": 0.3,
+    "loss_history_window": 50
+  },
+  "operations": {
+    "prune_interval": 10000,
+    "merge_interval": 10000,
+    "reorganize_interval": 50000,
+    "cache_decay_interval": 10000
+  },
+  "pruning": {
+    "trust_threshold": 0.2,
+    "usage_threshold": 50,
+    "dormancy_threshold": 10000,
+    "validation_drop_threshold": 0.05,
+    "enabled": true,
+    "check_interval": 500
+  },
+  "merging": {
+    "similarity_threshold": 0.85,
+    "min_trust": 0.3,
+    "validation_drop_threshold": 0.05,
+    "enabled": true,
+    "check_interval": 500
+  },
+  "growing": {
+    "error_cluster_min_size": 100,
+    "error_frequency_threshold": 0.01,
+    "new_agent_initial_trust": 0.3,
+    "validation_period": 1000,
+    "success_threshold": 0.2,
+    "failure_threshold": 0.05,
+    "enabled": true,
+    "performance_threshold": 0.9,
+    "max_new_agents": 3,
+    "check_interval": 1000
+  },
+  "reorganization": {
+    "enabled": true,
+    "check_interval": 2000,
+    "max_moves_per_cycle": 0.1
+  },
+  "exploration": {
+    "initial_rate": 0.3,
+    "decay_constant": 100000,
+    "minimum_rate": 0.05,
+    "decay": 0.995
+  },
+  "rollback": {
+    "max_snapshots": 5,
+    "performance_drop_threshold": 0.15
+  },
+  "stopping": {
+    "max_iterations": 500000,
+    "patience": 50000,
+    "min_improvement": 0.001,
+    "enabled": true
+  },
+  "autonomy": {
+    "parameter_control": {
+      "enabled": true,
+      "lr_adjustment_rate": 0.1,
+      "min_lr": 1e-6,
+      "max_lr": 0.01
+    },
+    "early_stopping": {
+      "enabled": true,
+      "patience": 1000,
+      "min_improvement": 0.001
+    }
+  },
+  "safety": {
+    "snapshot_interval": 1000,
+    "max_snapshots": 5,
+    "rollback_threshold": 0.5
+  },
+  "data": {
+    "dataset": "wikitext-2",
+    "train_split": 0.9,
+    "val_split": 0.05,
+    "test_split": 0.05
+  },
+  "training": {
+    "learning_rate": 0.001,
+    "max_steps": 10000,
+    "eval_every": 500,
+    "log_every": 100,
+    "num_epochs": 30
+  },
+  "comparison": {
+    "metrics": [
+      "loss",
+      "perplexity",
+      "accuracy",
+      "generation_quality"
+    ],
+    "num_generation_samples": 5,
+    "generation_length": 100
+  }
+}
