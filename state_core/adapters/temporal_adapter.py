@@ -51,12 +51,25 @@ class TemporalAdapter(nn.Module):
             import importlib.util
             from pathlib import Path
             
-            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL").resolve()
-            time_emb_file = temporal_path / "time_embeddings.py"
+            # Search for time_embeddings.py in likely locations
+            project_root = Path(__file__).resolve().parent.parent.parent
+            possible_paths = [
+                project_root / "TEMPORAL" / "time_embeddings.py",
+                Path("TEMPORAL/time_embeddings.py").resolve(),
+                Path("/kaggle/working/Self-Organizing-State-Model/TEMPORAL/time_embeddings.py"),
+                Path("../TEMPORAL/time_embeddings.py").resolve()
+            ]
             
-            if time_emb_file.exists():
-                spec = importlib.util.spec_from_file_location("time_embeddings", time_emb_file)
+            time_emb_file = None
+            for path in possible_paths:
+                if path.exists():
+                    time_emb_file = path
+                    break
+            
+            if time_emb_file and time_emb_file.exists():
+                spec = importlib.util.spec_from_file_location("time_embeddings", str(time_emb_file))
                 time_embeddings_module = importlib.util.module_from_spec(spec)
+                sys.modules["time_embeddings"] = time_embeddings_module
                 spec.loader.exec_module(time_embeddings_module)
                 
                 Temporal_TimeEmbeddings = time_embeddings_module.Temporal_TimeEmbeddings
@@ -66,9 +79,9 @@ class TemporalAdapter(nn.Module):
                     learning_mode=learning_mode
                 )
                 self._using_temporal = True
-                print("✓ TEMPORAL time embeddings loaded successfully")
+                print(f"✓ TEMPORAL time embeddings loaded successfully from {time_emb_file}")
             else:
-                raise FileNotFoundError(f"time_embeddings.py not found at {time_emb_file}")
+                raise FileNotFoundError(f"time_embeddings.py not found in any standard location. Checked: {[str(p) for p in possible_paths]}")
         except Exception as e:
             print(f"Note: Using simple time embeddings (TEMPORAL import: {type(e).__name__}: {e})")
             self._using_temporal = False
