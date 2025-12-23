@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-SOSM Large-Scale Training Script
+SOSM Large-Scale Training Script (100M+ Parameters)
 
 Trains SOSM with:
-- Larger model dimensions (256 vs 96)
-- More MU layers (4 vs 2)
+- Large model (100M+ params)
 - 50 epochs with checkpointing
 - Built-in generation test
 
@@ -12,6 +11,9 @@ Usage:
     python train_large.py --epochs 50
     python train_large.py --epochs 10 --quick
 """
+
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 import argparse
 import time
@@ -33,22 +35,23 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def get_args():
     parser = argparse.ArgumentParser(description='SOSM Large-Scale Training')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--seq-length', type=int, default=64, help='Sequence length')
-    parser.add_argument('--model-dim', type=int, default=256, help='Model hidden dimension')
-    parser.add_argument('--embed-dim', type=int, default=128, help='MU embedding dimension')
-    parser.add_argument('--time-dim', type=int, default=64, help='TEMPORAL dimension')
-    parser.add_argument('--mu-layers', type=int, default=4, help='Number of MU block-attention layers')
-    parser.add_argument('--n-layers', type=int, default=6, help='Number of transformer layers')
+    # Increased for 100M+ params
+    parser.add_argument('--model-dim', type=int, default=512, help='Model hidden dimension')
+    parser.add_argument('--embed-dim', type=int, default=256, help='MU embedding dimension')
+    parser.add_argument('--time-dim', type=int, default=128, help='TEMPORAL dimension')
+    parser.add_argument('--mu-layers', type=int, default=6, help='Number of MU block-attention layers')
+    parser.add_argument('--n-layers', type=int, default=12, help='Number of transformer layers')
     parser.add_argument('--n-heads', type=int, default=8, help='Number of attention heads')
-    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--checkpoint-every', type=int, default=10, help='Save checkpoint every N epochs')
     parser.add_argument('--quick', action='store_true', help='Quick test mode (smaller dataset)')
     return parser.parse_args()
 
 
 def create_sosm(args, vocab_size):
-    """Create SOSM with larger configuration."""
+    """Create SOSM with 100M+ configuration."""
     config = {
         'stage': 3,
         'components': {
@@ -91,7 +94,13 @@ def train_epoch(model, dataloader, optimizer, epoch):
     
     start_time = time.time()
     
-    for batch_idx, (x, y) in enumerate(dataloader):
+    for batch_idx, batch in enumerate(dataloader):
+        # Dataset returns (x, y, domain) - unpack correctly
+        if len(batch) == 3:
+            x, y, _ = batch  # Ignore domain
+        else:
+            x, y = batch
+        
         x, y = x.to(device), y.to(device)
         
         optimizer.zero_grad()
@@ -105,7 +114,7 @@ def train_epoch(model, dataloader, optimizer, epoch):
         total_loss += loss.item()
         total_batches += 1
         
-        if batch_idx % 100 == 0:
+        if batch_idx % 50 == 0:
             elapsed = time.time() - start_time
             speed = (batch_idx + 1) / elapsed if elapsed > 0 else 0
             edges = state.routing_state.get('num_edges', 0) if state.routing_state else 0
@@ -121,7 +130,12 @@ def evaluate(model, dataloader):
     total_batches = 0
     
     with torch.no_grad():
-        for x, y in dataloader:
+        for batch in dataloader:
+            if len(batch) == 3:
+                x, y, _ = batch
+            else:
+                x, y = batch
+            
             x, y = x.to(device), y.to(device)
             logits, _ = model(x)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
@@ -172,7 +186,7 @@ def main():
     args = get_args()
     
     print("=" * 70)
-    print("SOSM LARGE-SCALE TRAINING")
+    print("SOSM LARGE-SCALE TRAINING (100M+ Target)")
     print("=" * 70)
     print(f"Device: {device}")
     print(f"Epochs: {args.epochs}")
@@ -201,8 +215,8 @@ def main():
     vocab_size = train_dataset.vocab_size
     print(f"Vocab size: {vocab_size}")
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=2)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=0)
     
     # Tokenizer for generation
     try:
@@ -216,6 +230,11 @@ def main():
     model, config = create_sosm(args, vocab_size)
     params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {params / 1e6:.1f}M")
+    
+    if params < 100_000_000:
+        print(f"⚠️  Model is {params/1e6:.1f}M params, below 100M target")
+    else:
+        print(f"✓ Model meets 100M+ target")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
