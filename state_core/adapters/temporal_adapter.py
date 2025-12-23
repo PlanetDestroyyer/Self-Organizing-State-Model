@@ -13,7 +13,7 @@ import torch.nn as nn
 from typing import Optional
 
 # Add TEMPORAL repo to path
-TEMPORAL_PATH = Path(__file__).parent.parent.parent / "TEMPORAL" / "temporal_prototype"
+TEMPORAL_PATH = Path(__file__).parent.parent.parent / "TEMPORAL"
 if str(TEMPORAL_PATH) not in sys.path:
     sys.path.insert(0, str(TEMPORAL_PATH))
 
@@ -50,7 +50,7 @@ class TemporalAdapter(nn.Module):
             # Import from TEMPORAL module - use absolute path
             import sys
             from pathlib import Path
-            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL" / "temporal_prototype").resolve()
+            temporal_path = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL").resolve()
             if str(temporal_path) not in sys.path:
                 sys.path.insert(0, str(temporal_path))
             
