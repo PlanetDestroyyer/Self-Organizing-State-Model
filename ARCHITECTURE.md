@@ -39,20 +39,27 @@ flowchart TB
         J -.-> J1["❌ NO projected embeddings\n❌ NO attention outputs\n❌ NO learnable params"]
     end
     
-    subgraph "6. STATE UPDATE OPERATORS"
-        H --> L["input_proj(semantic ⊕ temporal)"]
-        L --> M["StateUpdateOperator × N"]
+    subgraph "6. STATE PROJECTION"
+        D --> SP1["Proj_Semantic"]
+        F --> SP2["Proj_Temporal"]
+        SP1 --> CW["Computation Workspace (Sum)"]
+        SP2 --> CW
+        CW -.-> CW1["Additive combination\nNO concatenation"]
+    end
+    
+    subgraph "7. STATE UPDATE OPERATORS"
+        CW --> M["StateUpdateOperator × N"]
         K --> M
         M --> N["updated representation"]
         M -.-> M1["Operator updates state\nOperator is NOT the model"]
     end
     
-    subgraph "7. OUTPUT"
+    subgraph "8. OUTPUT"
         N --> O["output_proj"]
         O --> P["logits [B, T, vocab]"]
     end
     
-    subgraph "8-11. TRAINING"
+    subgraph "9-12. TRAINING"
         P --> Q["CrossEntropyLoss"]
         Q --> R["loss.backward()"]
         R --> S["K-1: Trace gradients hierarchically"]

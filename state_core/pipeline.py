@@ -90,6 +90,43 @@ class StateUpdateOperator(nn.Module):
         return x
 
 
+class StateProjector(nn.Module):
+    """
+    Projects separate Semantic and Temporal states into a unified Computation Workspace.
+    
+    CRITICAL: Does NOT concatenate raw states. Projects then combines (additively).
+    State is persistent; Projection is temporary.
+    """
+    
+    def __init__(self, semantic_dim: int, temporal_dim: int, compute_dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.proj_semantic = nn.Linear(semantic_dim, compute_dim)
+        self.proj_temporal = nn.Linear(temporal_dim, compute_dim)
+        self.norm = nn.LayerNorm(compute_dim)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, semantic_state: torch.Tensor, temporal_state: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Project and combine states.
+        
+        Args:
+            semantic_state: [B, T, sem_dim]
+            temporal_state: [B, T, temp_dim] (Optional)
+            
+        Returns:
+            computation_workspace: [B, T, compute_dim]
+        """
+        # Project independently
+        workspace = self.proj_semantic(semantic_state)
+        
+        if temporal_state is not None:
+            # Combine via addition in projected space (NO concatenation of raw states)
+            workspace = workspace + self.proj_temporal(temporal_state)
+            
+        return self.dropout(self.norm(workspace))
+
+
+
 class StateCorePipeline(nn.Module):
     """
     Main execution pipeline for the Self-Organizing State Model.
@@ -188,8 +225,32 @@ class StateCorePipeline(nn.Module):
         n_heads = model_cfg.get('n_heads', 4)
         dropout = model_cfg.get('dropout', 0.1)
         
-        # Input projection (semantic + temporal → computation space)
-        self.input_proj = nn.Linear(self.model_dim, hidden_dim)
+        # State Projector (Replaces simple Linear input_proj)
+        # Separate projection for Semantic and Temporal
+        self.state_projector = StateProjector(
+            semantic_dim=self.embed_dim,
+            temporal_dim=self.time_dim,
+            compute_dim=hidden_dim,
+            dropout=dropout
+        )
+
+# ... (StateUpdateOperator defined elsewhere, unchanged except constructor signature if needed) ...
+
+# Inside StateCorePipeline.__init__:
+        # === STATE PROJECTION & OPERATORS ===
+        hidden_dim = model_cfg.get('hidden_dim', 256)
+        n_layers = model_cfg.get('n_layers', 6)
+        n_heads = model_cfg.get('n_heads', 4)
+        dropout = model_cfg.get('dropout', 0.1)
+        
+        # State Projector (Replaces simple Linear input_proj)
+        # Separate projection for Semantic and Temporal
+        self.state_projector = StateProjector(
+            semantic_dim=self.embed_dim,
+            temporal_dim=self.time_dim,
+            compute_dim=hidden_dim,
+            dropout=dropout
+        )
         
         # State Update Operators (NOT Transformer layers)
         self.operators = nn.ModuleList([
@@ -213,7 +274,7 @@ class StateCorePipeline(nn.Module):
         """Initialize K-1 adapter (called after model is built)."""
         if self.k1_adapter is None:
             self.k1_adapter = K1Adapter(self)
-    
+            
     def forward(
         self,
         token_ids: torch.Tensor,
@@ -221,14 +282,6 @@ class StateCorePipeline(nn.Module):
     ) -> Tuple[torch.Tensor, State]:
         """
         Forward pass through the pipeline.
-        
-        EXECUTION ORDER:
-        1. MU → semantic_state (position-invariant)
-        2. TEMPORAL → temporal_state (if enabled)
-        3. State Assembly (semantic + temporal + positions, kept SEPARATE)
-        4. Graph Construction (uses MU Identity + positions)
-        5. State Update Operators (project, compute, update)
-        6. Output projection → logits
         
         Args:
             token_ids: [B, T] token indices
@@ -256,13 +309,13 @@ class StateCorePipeline(nn.Module):
                 update_time=self.training
             )
         
-        # === Step 3: Prepare for computation (internal projection) ===
-        # NOTE: We concatenate ONLY for the State Update Operators
-        # The State object still keeps them separate
-        if state.temporal_state is not None:
-            operator_input = torch.cat([state.semantic_state, state.temporal_state], dim=-1)
-        else:
-            operator_input = state.semantic_state
+        # === Step 3: Project to Computation Workspace ===
+        # CRITICAL: No torch.cat on state components.
+        # Project inputs separately, then combine into temporary workspace.
+        computation_workspace = self.state_projector(
+            state.semantic_state,
+            state.temporal_state if self.stage_controller.temporal_enabled else None
+        )
         
         # === Step 4: Graph Construction (uses MU Identity + positions) ===
         attention_mask = None
@@ -285,7 +338,8 @@ class StateCorePipeline(nn.Module):
             }
         
         # === Step 5: State Update Operators ===
-        h = self.input_proj(operator_input)
+        # Use computation workspace as initial hidden state
+        h = computation_workspace
         
         for operator in self.operators:
             h = operator(h, attention_mask)
