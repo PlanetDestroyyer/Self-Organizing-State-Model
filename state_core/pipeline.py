@@ -209,13 +209,15 @@ class StateCorePipeline(nn.Module):
             learning_mode=temporal_cfg.get('learning_mode', 'gradient')
         )
         
-        # Graph Builder (Stage 3) - uses MU Identity + positions ONLY
+        # Graph Builder (Stage 3) - uses MU Identity + positions
+        # NOTE: semantic_edges=True connects similar tokens for context
+        # NOTE: random_shortcuts enables "small world" long-range connections
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
-            enable_semantic=graph_cfg.get('semantic_edges', False),
-            enable_shortcuts=graph_cfg.get('random_shortcuts', 0) > 0,
-            semantic_threshold=graph_cfg.get('semantic_threshold', 0.5),
-            shortcut_prob=graph_cfg.get('random_shortcuts', 0)
+            enable_semantic=graph_cfg.get('semantic_edges', True),  # Was False - caused loops
+            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.05) > 0,
+            semantic_threshold=graph_cfg.get('semantic_threshold', 0.7),  # Tightened threshold
+            shortcut_prob=graph_cfg.get('random_shortcuts', 0.05)
         )
         self.graph_mask_converter = GraphMaskConverter()
         
