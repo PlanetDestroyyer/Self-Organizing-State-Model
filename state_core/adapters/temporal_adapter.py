@@ -47,6 +47,13 @@ class TemporalAdapter(nn.Module):
         
         # Try to import TEMPORAL's time embeddings
         try:
+            # Import from TEMPORAL module
+            import sys
+            from pathlib import Path
+            temporal_path = Path(__file__).parent.parent.parent / "TEMPORAL" / "temporal_prototype"
+            if str(temporal_path) not in sys.path:
+                sys.path.insert(0, str(temporal_path))
+            
             from time_embeddings import Temporal_TimeEmbeddings
             self.time_embeddings = Temporal_TimeEmbeddings(
                 vocab_size=vocab_size,
@@ -54,9 +61,9 @@ class TemporalAdapter(nn.Module):
                 learning_mode=learning_mode
             )
             self._using_temporal = True
-        except ImportError as e:
-            print(f"Warning: Could not import TEMPORAL: {e}")
-            print("Falling back to simple time embeddings")
+            print("✓ TEMPORAL time embeddings loaded successfully")
+        except Exception as e:
+            print(f"Note: Using simple time embeddings (TEMPORAL import: {type(e).__name__})")
             self._using_temporal = False
             self._init_simple_time_embeddings(vocab_size, time_dim)
     

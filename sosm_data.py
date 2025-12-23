@@ -70,15 +70,28 @@ class MultiDomainDataset(Dataset):
                 samples = self._tokenize_text(text)
                 
             elif domain == 'code':
-                # Use code dataset
-                ds = load_dataset('bigcode/the-stack-smol', 'data/python', 
-                                 split='train', streaming=True, trust_remote_code=True)
-                text = ''
-                for i, item in enumerate(ds):
-                    if i >= 500:  # Limit samples
-                        break
-                    text += item.get('content', '') + '\n'
-                samples = self._tokenize_text(text)
+                # Use code dataset - use default config
+                try:
+                    ds = load_dataset('bigcode/the-stack-smol', split='train', streaming=True)
+                    text = ''
+                    for i, item in enumerate(ds):
+                        if i >= 500:  # Limit samples
+                            break
+                        content = item.get('content', '')
+                        if content:
+                            text += content + '\n'
+                    samples = self._tokenize_text(text)
+                except Exception:
+                    # Fallback to codeparrot/github-code-clean
+                    ds = load_dataset('codeparrot/github-code-clean', 
+                                     streaming=True, split='train',
+                                     languages=['Python'])
+                    text = ''
+                    for i, item in enumerate(ds):
+                        if i >= 500:
+                            break
+                        text += item.get('code', '') + '\n'
+                    samples = self._tokenize_text(text)
                 
             elif domain == 'scientific':
                 # Use ArXiv dataset
