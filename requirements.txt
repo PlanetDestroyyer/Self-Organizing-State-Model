@@ -1,0 +1,19 @@
+# Core Dependencies
+torch>=2.0.0
+numpy>=1.21.0
+
+# Data Loading
+datasets>=2.14.0
+tokenizers>=0.13.0
+
+# Configuration
+pyyaml>=6.0
+
+# Progress & Logging
+tqdm>=4.65.0
+
+# Optional: HuggingFace Hub
+huggingface-hub>=0.16.0
+
+# Optional: Experiment Tracking
+# wandb>=0.15.0
