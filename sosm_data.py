@@ -11,9 +11,14 @@ from typing import Tuple, List, Optional
 import os
 
 
+# Shared vocabulary (built once, used by all instances)
+_SHARED_VOCAB = None
+
+
 class MultiDomainDataset(Dataset):
     """
     Multi-domain dataset combining WikiText, Code, and Scientific text.
+    Uses a SHARED vocabulary across all domains for consistent tokenization.
     """
     
     DOMAINS = ['wikitext', 'code', 'scientific']
@@ -41,6 +46,9 @@ class MultiDomainDataset(Dataset):
         self.seq_length = seq_length
         self.split = split
         self.max_samples = max_samples_per_domain
+        
+        # Build shared vocabulary (only once)
+        self._build_shared_vocab()
         
         # Load datasets
         self.data = []
@@ -113,14 +121,33 @@ class MultiDomainDataset(Dataset):
         print(f"  {domain}: {len(samples)} samples")
         return samples
     
-    def _tokenize_text(self, text: str) -> List[torch.Tensor]:
-        """Simple character-level tokenization."""
-        # Build vocab from text (simple approach)
-        chars = sorted(set(text))
-        char_to_idx = {c: i % self.vocab_size for i, c in enumerate(chars)}
+    def _build_shared_vocab(self):
+        """Build shared vocabulary from a fixed character set."""
+        global _SHARED_VOCAB
         
-        # Convert to token IDs
-        tokens = [char_to_idx.get(c, 0) for c in text]
+        if _SHARED_VOCAB is None:
+            # Use comprehensive character set that covers all domains
+            chars = (
+                " \t\n"  # Whitespace
+                "abcdefghijklmnopqrstuvwxyz"  # Lowercase
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # Uppercase
+                "0123456789"  # Digits
+                ".,;:!?'\"-()[]{}"  # Punctuation
+                "@#$%^&*+=<>/\\|`~_"  # Symbols (for code)
+                "àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"  # Extended Latin
+            )
+            char_to_idx = {c: i for i, c in enumerate(chars)}
+            idx_to_char = {i: c for c, i in char_to_idx.items()}
+            _SHARED_VOCAB = {'char_to_idx': char_to_idx, 'idx_to_char': idx_to_char}
+            print(f"  Built shared vocab: {len(chars)} chars")
+        
+        self.char_to_idx = _SHARED_VOCAB['char_to_idx']
+        self.idx_to_char = _SHARED_VOCAB['idx_to_char']
+    
+    def _tokenize_text(self, text: str) -> List[torch.Tensor]:
+        """Character-level tokenization using shared vocabulary."""
+        # Convert to token IDs using shared vocab
+        tokens = [self.char_to_idx.get(c, 0) for c in text]
         
         # Create sequences
         samples = []
@@ -130,6 +157,10 @@ class MultiDomainDataset(Dataset):
                 samples.append(torch.tensor(seq, dtype=torch.long))
         
         return samples
+    
+    def get_vocab(self) -> Tuple[dict, dict]:
+        """Get vocabulary mappings for saving with checkpoints."""
+        return self.char_to_idx, self.idx_to_char
     
     def _generate_synthetic(self, domain: str, count: int) -> List[torch.Tensor]:
         """Generate synthetic data if real data unavailable."""

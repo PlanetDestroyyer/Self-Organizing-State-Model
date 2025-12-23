@@ -229,12 +229,15 @@ def main():
     print("SOSM TEST COMPLETE")
     print("=" * 70)
     
-    # Save checkpoint
+    # Save checkpoint with vocabulary
     checkpoint_name = f'sosm_stage{args.stage}_checkpoint.pt'
+    char_to_idx, idx_to_char = train_loader.dataset.get_vocab()
     torch.save({
         'model_state_dict': pipeline.state_dict(),
         'stage': args.stage,
-        'vocab_size': VOCAB_SIZE
+        'vocab_size': VOCAB_SIZE,
+        'char_to_idx': char_to_idx,
+        'idx_to_char': idx_to_char
     }, checkpoint_name)
     print(f"Saved: {checkpoint_name}")
 

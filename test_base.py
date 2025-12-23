@@ -205,10 +205,13 @@ def main():
     print("BASELINE TEST COMPLETE")
     print("=" * 70)
     
-    # Save checkpoint
+    # Save checkpoint with vocabulary
+    char_to_idx, idx_to_char = train_loader.dataset.get_vocab()
     torch.save({
         'model_state_dict': model.state_dict(),
-        'vocab_size': VOCAB_SIZE
+        'vocab_size': VOCAB_SIZE,
+        'char_to_idx': char_to_idx,
+        'idx_to_char': idx_to_char
     }, 'baseline_checkpoint.pt')
     print("Saved: baseline_checkpoint.pt")
 

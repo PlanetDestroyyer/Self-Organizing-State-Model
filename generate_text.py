@@ -93,28 +93,33 @@ def generate(model, prompt_ids: list, max_tokens: int = 30, temperature: float =
 
 
 def build_vocab_from_data():
-    """Rebuild vocabulary from training data (matches sosm_data.py)."""
+    """Build vocabulary using same fixed charset as sosm_data.py."""
+    # Use same comprehensive character set as sosm_data.py
+    chars = (
+        " \t\n"  # Whitespace
+        "abcdefghijklmnopqrstuvwxyz"  # Lowercase
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # Uppercase
+        "0123456789"  # Digits
+        ".,;:!?'\"-()[]{}"  # Punctuation
+        "@#$%^&*+=<>/\\|`~_"  # Symbols (for code)
+        "àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"  # Extended Latin
+    )
+    char_to_idx = {c: i for i, c in enumerate(chars)}
+    idx_to_char = {i: c for c, i in char_to_idx.items()}
+    print(f"  Using fixed vocab: {len(chars)} chars")
+    return char_to_idx, idx_to_char
+
+
+def load_vocab_from_checkpoint(checkpoint_path: str):
+    """Try to load vocabulary from checkpoint."""
     try:
-        from datasets import load_dataset
-        
-        # Load WikiText (same as training)
-        ds = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
-        text = '\n'.join([t for t in ds['text'] if t.strip()])[:100000]  # First 100k chars
-        
-        # Build vocab same as sosm_data.py
-        chars = sorted(set(text))
-        char_to_idx = {c: i % 10000 for i, c in enumerate(chars)}
-        idx_to_char = {i: c for c, i in char_to_idx.items()}
-        
-        print(f"  Built vocab from WikiText: {len(chars)} unique chars")
-        return char_to_idx, idx_to_char
-    except Exception as e:
-        print(f"  Could not load WikiText: {e}")
-        # Fallback
-        chars = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'\"-:;()\n\t"
-        char_to_idx = {c: i for i, c in enumerate(chars)}
-        idx_to_char = {i: c for c, i in char_to_idx.items()}
-        return char_to_idx, idx_to_char
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        if 'char_to_idx' in checkpoint and 'idx_to_char' in checkpoint:
+            print(f"  ✓ Loaded vocab from checkpoint")
+            return checkpoint['char_to_idx'], checkpoint['idx_to_char']
+    except:
+        pass
+    return None, None
 
 
 def tokens_to_text(token_ids: list, idx_to_char: dict) -> str:
