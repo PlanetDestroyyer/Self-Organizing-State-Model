@@ -2,15 +2,15 @@
 """
 SOSM Large-Scale Training Script
 
-Trains SOSM and Baseline with:
+Trains SOSM with:
 - Larger model dimensions (256 vs 96)
 - More MU layers (4 vs 2)
 - 50 epochs with checkpointing
 - Built-in generation test
 
 Usage:
-    python train_large.py --epochs 50 --model-dim 256 --mu-layers 4
-    python train_large.py --epochs 10 --quick  # Quick test
+    python train_large.py --epochs 50
+    python train_large.py --epochs 10 --quick
 """
 
 import argparse
@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from sosm_data import MultiDomainDataset
 from state_core import StateCorePipeline
-from test_base import BaselineTransformer
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -37,7 +36,7 @@ def get_args():
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
     parser.add_argument('--seq-length', type=int, default=64, help='Sequence length')
     parser.add_argument('--model-dim', type=int, default=256, help='Model hidden dimension')
-    parser.add_argument('--embed-dim', type=int, default=128, help='MU embedding dimension (must be square)')
+    parser.add_argument('--embed-dim', type=int, default=128, help='MU embedding dimension')
     parser.add_argument('--time-dim', type=int, default=64, help='TEMPORAL dimension')
     parser.add_argument('--mu-layers', type=int, default=4, help='Number of MU block-attention layers')
     parser.add_argument('--n-layers', type=int, default=6, help='Number of transformer layers')
@@ -45,7 +44,6 @@ def get_args():
     parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
     parser.add_argument('--checkpoint-every', type=int, default=10, help='Save checkpoint every N epochs')
     parser.add_argument('--quick', action='store_true', help='Quick test mode (smaller dataset)')
-    parser.add_argument('--skip-baseline', action='store_true', help='Skip baseline training')
     return parser.parse_args()
 
 
@@ -56,13 +54,13 @@ def create_sosm(args, vocab_size):
         'components': {
             'mu': {
                 'vocab_size': vocab_size,
-                'embed_dim': args.embed_dim,  # Larger: 128 vs 64
+                'embed_dim': args.embed_dim,
                 'max_seq_len': args.seq_length,
                 'use_full_model': True,
-                'mu_layers': args.mu_layers,  # More: 4 vs 2
+                'mu_layers': args.mu_layers,
             },
             'temporal': {
-                'time_dim': args.time_dim,  # Larger: 64 vs 32
+                'time_dim': args.time_dim,
                 'learning_mode': 'gradient',
             },
             'k1': {},
@@ -74,9 +72,9 @@ def create_sosm(args, vocab_size):
             }
         },
         'model': {
-            'hidden_dim': args.model_dim,  # Larger: 256 vs 96
-            'n_layers': args.n_layers,     # More: 6 vs 4
-            'n_heads': args.n_heads,       # More: 8 vs 4
+            'hidden_dim': args.model_dim,
+            'n_layers': args.n_layers,
+            'n_heads': args.n_heads,
             'dropout': 0.1,
         }
     }
@@ -85,21 +83,7 @@ def create_sosm(args, vocab_size):
     return model, config
 
 
-def create_baseline(args, vocab_size):
-    """Create comparable baseline transformer."""
-    model = BaselineTransformer(
-        vocab_size=vocab_size,
-        embed_dim=args.model_dim,
-        n_layers=args.n_layers,
-        n_heads=args.n_heads,
-        ff_dim=args.model_dim * 4,
-        max_seq_len=args.seq_length,
-        dropout=0.1
-    ).to(device)
-    return model
-
-
-def train_epoch(model, dataloader, optimizer, epoch, is_sosm=True):
+def train_epoch(model, dataloader, optimizer, epoch):
     """Train for one epoch."""
     model.train()
     total_loss = 0
@@ -111,12 +95,7 @@ def train_epoch(model, dataloader, optimizer, epoch, is_sosm=True):
         x, y = x.to(device), y.to(device)
         
         optimizer.zero_grad()
-        
-        if is_sosm:
-            logits, state = model(x)
-        else:
-            logits = model(x)
-        
+        logits, state = model(x)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
         loss.backward()
         
@@ -129,12 +108,13 @@ def train_epoch(model, dataloader, optimizer, epoch, is_sosm=True):
         if batch_idx % 100 == 0:
             elapsed = time.time() - start_time
             speed = (batch_idx + 1) / elapsed if elapsed > 0 else 0
-            print(f"  Batch {batch_idx}/{len(dataloader)}: loss={loss.item():.4f}, speed={speed:.1f} batch/s")
+            edges = state.routing_state.get('num_edges', 0) if state.routing_state else 0
+            print(f"  Batch {batch_idx}/{len(dataloader)}: loss={loss.item():.4f}, edges={edges}, speed={speed:.1f} batch/s")
     
     return total_loss / total_batches
 
 
-def evaluate(model, dataloader, is_sosm=True):
+def evaluate(model, dataloader):
     """Evaluate model."""
     model.eval()
     total_loss = 0
@@ -143,12 +123,7 @@ def evaluate(model, dataloader, is_sosm=True):
     with torch.no_grad():
         for x, y in dataloader:
             x, y = x.to(device), y.to(device)
-            
-            if is_sosm:
-                logits, _ = model(x)
-            else:
-                logits = model(x)
-            
+            logits, _ = model(x)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
             total_loss += loss.item()
             total_batches += 1
@@ -159,7 +134,7 @@ def evaluate(model, dataloader, is_sosm=True):
     return avg_loss, perplexity
 
 
-def generate_samples(model, tokenizer, prompts, max_tokens=50, is_sosm=True):
+def generate_samples(model, tokenizer, prompts, max_tokens=50):
     """Generate text samples."""
     model.eval()
     results = []
@@ -171,15 +146,11 @@ def generate_samples(model, tokenizer, prompts, max_tokens=50, is_sosm=True):
             for _ in range(max_tokens):
                 ctx = input_ids[-64:]
                 x = torch.tensor([ctx], dtype=torch.long, device=device)
+                logits, _ = model(x)
                 
-                if is_sosm:
-                    logits, _ = model(x)
-                else:
-                    logits = model(x)
+                next_logits = logits[0, -1, :] / 0.3
                 
-                next_logits = logits[0, -1, :] / 0.3  # Low temperature
-                
-                # Repetition penalty
+                # Strong repetition penalty
                 for token in input_ids[-30:]:
                     if token < len(next_logits):
                         next_logits[token] /= 4.0
@@ -204,16 +175,13 @@ def main():
     print("SOSM LARGE-SCALE TRAINING")
     print("=" * 70)
     print(f"Device: {device}")
-    print(f"Configuration:")
-    print(f"  Epochs: {args.epochs}")
-    print(f"  Model Dim: {args.model_dim}")
-    print(f"  Embed Dim: {args.embed_dim}")
-    print(f"  Time Dim: {args.time_dim}")
-    print(f"  MU Layers: {args.mu_layers}")
-    print(f"  Transformer Layers: {args.n_layers}")
-    print(f"  Attention Heads: {args.n_heads}")
-    print(f"  Batch Size: {args.batch_size}")
-    print(f"  Learning Rate: {args.lr}")
+    print(f"Epochs: {args.epochs}")
+    print(f"Model Dim: {args.model_dim}")
+    print(f"Embed Dim: {args.embed_dim}")
+    print(f"Time Dim: {args.time_dim}")
+    print(f"MU Layers: {args.mu_layers}")
+    print(f"Transformer Layers: {args.n_layers}")
+    print(f"Attention Heads: {args.n_heads}")
     print()
     
     # Load data
@@ -231,151 +199,82 @@ def main():
     )
     
     vocab_size = train_dataset.vocab_size
-    print(f"Vocabulary size: {vocab_size}")
+    print(f"Vocab size: {vocab_size}")
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=2)
     
-    # Load tokenizer for generation
+    # Tokenizer for generation
     try:
         from transformers import GPT2TokenizerFast
         tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     except:
         tokenizer = None
-        print("Warning: Could not load tokenizer for generation")
     
-    # ===== TRAIN SOSM =====
-    print("\n" + "=" * 70)
-    print("TRAINING SOSM")
-    print("=" * 70)
+    # Create model
+    print("\nCreating SOSM...")
+    model, config = create_sosm(args, vocab_size)
+    params = sum(p.numel() for p in model.parameters())
+    print(f"Parameters: {params / 1e6:.1f}M")
     
-    sosm, sosm_config = create_sosm(args, vocab_size)
-    sosm_params = sum(p.numel() for p in sosm.parameters())
-    print(f"SOSM Parameters: {sosm_params / 1e6:.1f}M")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
-    sosm_optimizer = torch.optim.AdamW(sosm.parameters(), lr=args.lr, weight_decay=0.01)
-    sosm_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(sosm_optimizer, T_max=args.epochs)
+    best_ppl = float('inf')
     
-    best_sosm_ppl = float('inf')
+    # Training loop
+    print("\n" + "-" * 70)
+    print("TRAINING")
+    print("-" * 70)
     
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
         
-        train_loss = train_epoch(sosm, train_loader, sosm_optimizer, epoch, is_sosm=True)
-        test_loss, ppl = evaluate(sosm, test_loader, is_sosm=True)
-        
-        sosm_scheduler.step()
+        train_loss = train_epoch(model, train_loader, optimizer, epoch)
+        test_loss, ppl = evaluate(model, test_loader)
+        scheduler.step()
         
         print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Test Loss: {test_loss:.4f}")
         print(f"  Perplexity: {ppl:.2f}")
         
         # Save checkpoint
-        if epoch % args.checkpoint_every == 0 or ppl < best_sosm_ppl:
-            if ppl < best_sosm_ppl:
-                best_sosm_ppl = ppl
-                checkpoint_name = 'sosm_large_best.pt'
+        if epoch % args.checkpoint_every == 0 or ppl < best_ppl:
+            if ppl < best_ppl:
+                best_ppl = ppl
+                name = 'sosm_large_best.pt'
             else:
-                checkpoint_name = f'sosm_large_epoch{epoch}.pt'
+                name = f'sosm_large_e{epoch}.pt'
             
             torch.save({
                 'epoch': epoch,
-                'model_state_dict': sosm.state_dict(),
-                'optimizer_state_dict': sosm_optimizer.state_dict(),
-                'config': sosm_config,
+                'model_state_dict': model.state_dict(),
+                'config': config,
                 'vocab_size': vocab_size,
-                'test_loss': test_loss,
                 'perplexity': ppl,
-            }, checkpoint_name)
-            print(f"  ✓ Saved: {checkpoint_name}")
+            }, name)
+            print(f"  ✓ Saved: {name}")
         
         # Generate samples every 10 epochs
         if epoch % 10 == 0 and tokenizer:
-            print("\n  Sample Generation:")
+            print("\n  Generation Test:")
             prompts = ["The capital of India is", "Once upon a time"]
-            samples = generate_samples(sosm, tokenizer, prompts, is_sosm=True)
-            for prompt, sample in zip(prompts, samples):
-                print(f"    '{prompt}' → {sample[:100]}...")
+            samples = generate_samples(model, tokenizer, prompts)
+            for p, s in zip(prompts, samples):
+                print(f"    '{p}' → {s[:80]}...")
     
-    print(f"\n✓ SOSM Training Complete. Best PPL: {best_sosm_ppl:.2f}")
-    
-    # ===== TRAIN BASELINE =====
-    if not args.skip_baseline:
-        print("\n" + "=" * 70)
-        print("TRAINING BASELINE")
-        print("=" * 70)
-        
-        baseline = create_baseline(args, vocab_size)
-        baseline_params = sum(p.numel() for p in baseline.parameters())
-        print(f"Baseline Parameters: {baseline_params / 1e6:.1f}M")
-        
-        baseline_optimizer = torch.optim.AdamW(baseline.parameters(), lr=args.lr, weight_decay=0.01)
-        baseline_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(baseline_optimizer, T_max=args.epochs)
-        
-        best_baseline_ppl = float('inf')
-        
-        for epoch in range(1, args.epochs + 1):
-            print(f"\nEpoch {epoch}/{args.epochs}")
-            
-            train_loss = train_epoch(baseline, train_loader, baseline_optimizer, epoch, is_sosm=False)
-            test_loss, ppl = evaluate(baseline, test_loader, is_sosm=False)
-            
-            baseline_scheduler.step()
-            
-            print(f"  Train Loss: {train_loss:.4f}")
-            print(f"  Test Loss: {test_loss:.4f}")
-            print(f"  Perplexity: {ppl:.2f}")
-            
-            if ppl < best_baseline_ppl:
-                best_baseline_ppl = ppl
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': baseline.state_dict(),
-                    'vocab_size': vocab_size,
-                    'test_loss': test_loss,
-                    'perplexity': ppl,
-                }, 'baseline_large_best.pt')
-                print(f"  ✓ Saved: baseline_large_best.pt")
-        
-        print(f"\n✓ Baseline Training Complete. Best PPL: {best_baseline_ppl:.2f}")
-    
-    # ===== FINAL COMPARISON =====
-    print("\n" + "=" * 70)
-    print("FINAL COMPARISON")
-    print("=" * 70)
-    print(f"SOSM Best Perplexity: {best_sosm_ppl:.2f}")
-    if not args.skip_baseline:
-        print(f"Baseline Best Perplexity: {best_baseline_ppl:.2f}")
-        improvement = (best_baseline_ppl - best_sosm_ppl) / best_baseline_ppl * 100
-        print(f"SOSM Improvement: {improvement:.1f}%")
-    
-    # Final generation test
-    if tokenizer:
-        print("\n" + "-" * 70)
-        print("FINAL GENERATION TEST")
-        print("-" * 70)
-        
-        prompts = [
-            "The capital of India is",
-            "Once upon a time",
-            "The future of AI",
-            "def factorial(n):",
-        ]
-        
-        print("\n📗 SOSM Outputs:")
-        sosm_samples = generate_samples(sosm, tokenizer, prompts, is_sosm=True)
-        for prompt, sample in zip(prompts, sosm_samples):
-            print(f"  '{prompt}' → {sample[:150]}")
-        
-        if not args.skip_baseline:
-            print("\n📘 Baseline Outputs:")
-            baseline_samples = generate_samples(baseline, tokenizer, prompts, is_sosm=False)
-            for prompt, sample in zip(prompts, baseline_samples):
-                print(f"  '{prompt}' → {sample[:150]}")
-    
+    # Final test
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE")
     print("=" * 70)
+    print(f"Best Perplexity: {best_ppl:.2f}")
+    
+    if tokenizer:
+        print("\nFinal Generation:")
+        prompts = ["The capital of India is", "The future of AI", "Once upon a time", "def factorial(n):"]
+        samples = generate_samples(model, tokenizer, prompts)
+        for p, s in zip(prompts, samples):
+            print(f"  '{p}' → {s[:120]}")
 
 
 if __name__ == '__main__':
