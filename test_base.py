@@ -163,7 +163,7 @@ def main():
     print("Loading datasets...")
     train_loader, test_loader = create_dataloaders(
         batch_size=BATCH_SIZE,
-        max_seq_len=SEQ_LEN,
+        seq_length=SEQ_LEN,
         domains=['wikitext', 'code', 'scientific']
     )
     print()
