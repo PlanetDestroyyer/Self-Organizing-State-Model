@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 from typing import Optional
 
-# Add TEMPORAL repo to path
-TEMPORAL_PATH = Path(__file__).parent.parent.parent / "TEMPORAL"
+# Add TEMPORAL repo to path - use absolute resolved path
+TEMPORAL_PATH = (Path(__file__).resolve().parent.parent.parent / "TEMPORAL").resolve()
 if str(TEMPORAL_PATH) not in sys.path:
     sys.path.insert(0, str(TEMPORAL_PATH))
 
