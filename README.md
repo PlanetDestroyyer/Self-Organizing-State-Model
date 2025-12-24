@@ -331,21 +331,16 @@ Contributions welcome! Priority areas:
 If you use SOSM in your research:
 
 ```bibtex
-@software{sosm2024,
+@software{sosm2025,
   title = {Self-Organizing State Model: Graph-Constrained Semantic Routing},
   author = {PlanetDestroyyer},
-  year = {2024},
+  year = {2025},
   url = {https://github.com/PlanetDestroyyer/Self-Organizing-State-Model}
 }
 ```
 
 ---
 
-## 📜 License
-
-MIT License - see LICENSE file
-
----
 
 ## 🙏 Acknowledgments
 
