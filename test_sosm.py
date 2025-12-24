@@ -165,7 +165,7 @@ def main():
     train_loader, test_loader = create_dataloaders(
         batch_size=BATCH_SIZE,
         seq_length=SEQ_LEN,
-        domains=['wikitext', 'code', 'scientific']
+        domains=['wikitext']  # Single domain for coherent generation
     )
     print()
     
