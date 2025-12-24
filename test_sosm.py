@@ -335,8 +335,8 @@ def main():
                 'enabled': True,  # ENABLED
                 'sequential_edges': True,
                 'semantic_edges': True,  # ENABLED
-                'semantic_threshold': 0.0,  # FEP: No hard threshold - let attention learn
-                'random_shortcuts': 0.20,  # FEP: Small-world optimal (20%)
+                'semantic_threshold': 0.10,  # Sparse but permissive - avoids full connectivity
+                'random_shortcuts': 0.20,  # Small-world optimal (20%)
             }
         },
         'model': {
@@ -353,7 +353,7 @@ def main():
     print(f"✅ SOSM initialized: {n_params / 1e6:.2f}M parameters")
     print(f"   - MU: 16 semantic blocks with full attention (64D)")
     print(f"   - TEMPORAL: Self-learning (32D)")
-    print(f"   - Graph: FEP-optimized (threshold=0.0, shortcuts=20%)")
+    print(f"   - Graph: Sparse small-world (threshold=0.10, shortcuts=20%)")
     print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers")
     print(f"   - K-1: Analysis mode")
     print()
