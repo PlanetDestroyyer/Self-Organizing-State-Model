@@ -901,6 +901,44 @@ class BlockSpecializedAttention(nn.Module):
 
 ---
 
+### 4.6 Edge-Mamba (Graph-Constrained Recurrence)
+**Priority**: 🟡 HIGH  
+**Time**: 2-3 weeks  
+**Complexity**: Very High
+
+**What**: Use Mamba for message passing ALONG graph edges (not replacing graph!)
+
+**Key Insight**: Graph determines connectivity, Mamba handles propagation.
+
+**Code**:
+```python
+class EdgeMambaLayer(nn.Module):
+    def __init__(self, hidden_dim=896, state_dim=64):
+        super().__init__()
+        # Separate Mamba for each edge type
+        self.sequential_mamba = SelectiveSSM(hidden_dim, state_dim)
+        self.semantic_mamba = SelectiveSSM(hidden_dim, state_dim)
+        self.shortcut_mamba = SelectiveSSM(hidden_dim, state_dim)
+    
+    def forward(self, x, graph):
+        # Mamba propagates ONLY along graph edges
+        # Graph structure is preserved!
+        for (i, j) in graph.sequential_edges:
+            message, state = self.sequential_mamba(x[i], state)
+            x[j] += message  # Update only connected token
+```
+
+**Benefits**:
+- ✅ Preserves SOSM graph-based routing
+- ✅ O(1) per edge (vs O(d²) attention)
+- ✅ Interpretable (attribute to edges)
+- ✅ Efficient for long paths
+
+**File**: `state_core/operators/edge_mamba.py` (new)  
+**Test**: Compare with attention on long chains
+
+---
+
 ## Phase 4 Metrics
 
 **Expected Results**:
