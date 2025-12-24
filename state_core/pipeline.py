@@ -60,17 +60,16 @@ class StateUpdateOperator(nn.Module):
             nn.Dropout(dropout)
         )
         
-        # Gated residual (learnable gate for controlled updates)
-        self.gate = nn.Parameter(torch.ones(1) * 0.1)
-    
+        # NO GATING - use standard residual like proven SOTA models (MU, TEMPORAL)
+
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Update state representation.
-        
+
         Args:
             x: Projected state [B, T, dim]
             mask: Attention mask from graph routing (None = unrestricted)
-            
+
         Returns:
             Updated state representation [B, T, dim]
         """
@@ -81,9 +80,9 @@ class StateUpdateOperator(nn.Module):
         else:
             # Unrestricted attention (graph disabled)
             attn_out, _ = self.attn(normed, normed, normed)
-        
-        # Gated residual (controlled state update)
-        x = x + self.gate * attn_out
+
+        # FIXED: Standard residual (no gating - like MU and TEMPORAL!)
+        x = x + attn_out
         
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -181,9 +180,9 @@ class StateCorePipeline(nn.Module):
         model_cfg = config.get('model', {})
         
         # Vocab and dimensions
-        self.vocab_size = mu_cfg.get('vocab_size', 50000)
-        self.embed_dim = mu_cfg.get('embed_dim', 64)  # MU semantic dimension
-        self.time_dim = temporal_cfg.get('time_dim', 32)  # TEMPORAL dimension
+        self.vocab_size = mu_cfg.get('vocab_size', 50257)  # GPT-2 vocab
+        self.embed_dim = mu_cfg.get('embed_dim', 512)  # INCREASED: was 64, MU tested at 512+
+        self.time_dim = temporal_cfg.get('time_dim', 256)  # INCREASED: was 32, TEMPORAL tested at 256+
         self.max_seq_len = mu_cfg.get('max_seq_len', 512)
         
         # Compute model dimension (semantic + temporal if enabled)
@@ -194,14 +193,14 @@ class StateCorePipeline(nn.Module):
         # === ADAPTERS ===
         
         # MU Adapter (always enabled) - pure semantic, NO positional encoding
-        # use_full_model=True enables 16-block attention (was False before)
+        # use_full_model=False starts with simple embeddings (proven to work!)
         self.mu_adapter = MUAdapter(
             vocab_size=self.vocab_size,
             embed_dim=self.embed_dim,
             max_seq_len=self.max_seq_len,
             flatten_output=True,
-            use_full_model=mu_cfg.get('use_full_model', True),  # Now True by default!
-            n_layers=mu_cfg.get('mu_layers', 2),  # Number of block attention layers
+            use_full_model=mu_cfg.get('use_full_model', False),  # FIXED: Start simple (False)
+            n_layers=mu_cfg.get('mu_layers', 1),  # Reduced to 1 (faster, simpler)
             dropout=model_cfg.get('dropout', 0.1)
         )
         
@@ -213,22 +212,22 @@ class StateCorePipeline(nn.Module):
         )
         
         # Graph Builder (Stage 3) - uses MU semantic state + positions
-        # NOTE: semantic_edges=True connects similar tokens for context
-        # NOTE: random_shortcuts enables "small world" long-range connections
-        # FIXED: Lower threshold (0.2) for more edges, higher shortcuts (0.15)
+        # NOTE: semantic_edges disabled by default (too restrictive for small models)
+        # NOTE: random_shortcuts disabled by default (sequential edges sufficient)
+        # Start simple: just sequential edges (i -> i+1)
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
-            enable_semantic=graph_cfg.get('semantic_edges', True),
-            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.15) > 0,
-            semantic_threshold=graph_cfg.get('semantic_threshold', 0.2),  # Was 0.7 - too strict!
-            shortcut_prob=graph_cfg.get('random_shortcuts', 0.15)  # Was 0.05 - too few!
+            enable_semantic=graph_cfg.get('semantic_edges', False),  # FIXED: Disable by default
+            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.0) > 0,  # FIXED: Disable by default
+            semantic_threshold=graph_cfg.get('semantic_threshold', 0.3),
+            shortcut_prob=graph_cfg.get('random_shortcuts', 0.0)  # FIXED: 0 by default
         )
         self.graph_mask_converter = GraphMaskConverter()
         
         # === STATE UPDATE OPERATORS ===
-        hidden_dim = model_cfg.get('hidden_dim', 256)
+        hidden_dim = model_cfg.get('hidden_dim', 1024)  # INCREASED: was 256, now 1024 (match MU/TEMPORAL scale)
         n_layers = model_cfg.get('n_layers', 6)
-        n_heads = model_cfg.get('n_heads', 4)
+        n_heads = model_cfg.get('n_heads', 8)  # INCREASED: was 4, now 8 (must divide hidden_dim)
         dropout = model_cfg.get('dropout', 0.1)
         
         # State Projector (Replaces simple Linear input_proj)
@@ -240,25 +239,7 @@ class StateCorePipeline(nn.Module):
             dropout=dropout
         )
 
-# ... (StateUpdateOperator defined elsewhere, unchanged except constructor signature if needed) ...
-
-# Inside StateCorePipeline.__init__:
-        # === STATE PROJECTION & OPERATORS ===
-        hidden_dim = model_cfg.get('hidden_dim', 256)
-        n_layers = model_cfg.get('n_layers', 6)
-        n_heads = model_cfg.get('n_heads', 4)
-        dropout = model_cfg.get('dropout', 0.1)
-        
-        # State Projector (Replaces simple Linear input_proj)
-        # Separate projection for Semantic and Temporal
-        self.state_projector = StateProjector(
-            semantic_dim=self.embed_dim,
-            temporal_dim=self.time_dim,
-            compute_dim=hidden_dim,
-            dropout=dropout
-        )
-        
-        # State Update Operators (NOT Transformer layers)
+        # State Update Operators (NOT Transformer layers - computation primitives)
         self.operators = nn.ModuleList([
             StateUpdateOperator(hidden_dim, n_heads, hidden_dim * 4, dropout)
             for _ in range(n_layers)
