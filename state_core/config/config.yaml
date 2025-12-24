@@ -23,9 +23,9 @@ components:
   graph:
     enabled: false
     sequential_edges: true
-    semantic_edges: false
-    semantic_threshold: 0.5
-    random_shortcuts: 0.0
+    semantic_edges: true  # ENABLED: Creates edges based on semantic similarity
+    semantic_threshold: 0.3  # LOWERED: More permissive (was 0.5)
+    random_shortcuts: 0.05  # ENABLED: Small-world shortcuts for long-range connections
 
 model:
   hidden_dim: 256

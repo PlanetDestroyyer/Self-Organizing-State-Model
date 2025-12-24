@@ -92,36 +92,58 @@ class StateUpdateOperator(nn.Module):
 class StateProjector(nn.Module):
     """
     Projects separate Semantic and Temporal states into a unified Computation Workspace.
-    
-    CRITICAL: Does NOT concatenate raw states. Projects then combines (additively).
-    State is persistent; Projection is temporary.
+
+    Supports two combination modes:
+    - 'add': Project then add (original design)
+    - 'concat': Concatenate then project (like TEMPORAL standalone)
     """
-    
-    def __init__(self, semantic_dim: int, temporal_dim: int, compute_dim: int, dropout: float = 0.1):
+
+    def __init__(self, semantic_dim: int, temporal_dim: int, compute_dim: int,
+                 dropout: float = 0.1, combination_mode: str = 'concat'):
         super().__init__()
-        self.proj_semantic = nn.Linear(semantic_dim, compute_dim)
-        self.proj_temporal = nn.Linear(temporal_dim, compute_dim)
-        self.norm = nn.LayerNorm(compute_dim)
+        self.combination_mode = combination_mode
+
+        if combination_mode == 'add':
+            # Additive combination: project separately then add
+            self.proj_semantic = nn.Linear(semantic_dim, compute_dim)
+            self.proj_temporal = nn.Linear(temporal_dim, compute_dim)
+            self.norm = nn.LayerNorm(compute_dim)
+        elif combination_mode == 'concat':
+            # TEMPORAL-style: concatenate then project (RECOMMENDED)
+            # This preserves both representations like TEMPORAL's proven design
+            self.proj_combined = nn.Linear(semantic_dim + temporal_dim, compute_dim)
+            # Also need semantic-only projection for Stage 0 (when no temporal)
+            self.proj_semantic = nn.Linear(semantic_dim, compute_dim)
+            self.norm = nn.LayerNorm(compute_dim)
+        else:
+            raise ValueError(f"Unknown combination_mode: {combination_mode}")
+
         self.dropout = nn.Dropout(dropout)
-        
+
     def forward(self, semantic_state: torch.Tensor, temporal_state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Project and combine states.
-        
+
         Args:
             semantic_state: [B, T, sem_dim]
             temporal_state: [B, T, temp_dim] (Optional)
-            
+
         Returns:
             computation_workspace: [B, T, compute_dim]
         """
-        # Project independently
-        workspace = self.proj_semantic(semantic_state)
-        
-        if temporal_state is not None:
-            # Combine via addition in projected space (NO concatenation of raw states)
-            workspace = workspace + self.proj_temporal(temporal_state)
-            
+        if temporal_state is None:
+            # No temporal state: just project semantic (Stage 0)
+            workspace = self.proj_semantic(semantic_state)
+        else:
+            # Combine semantic + temporal
+            if self.combination_mode == 'add':
+                # Additive: project independently then add
+                workspace = self.proj_semantic(semantic_state) + self.proj_temporal(temporal_state)
+            else:  # concat
+                # Concatenative: concat then project (TEMPORAL-style, RECOMMENDED)
+                combined = torch.cat([semantic_state, temporal_state], dim=-1)
+                workspace = self.proj_combined(combined)
+
         return self.dropout(self.norm(workspace))
 
 
@@ -175,7 +197,7 @@ class StateCorePipeline(nn.Module):
         # Get component configs
         mu_cfg = config.get('components', {}).get('mu', {})
         temporal_cfg = config.get('components', {}).get('temporal', {})
-        k1_cfg = config.get('components', {}).get('k1', {})
+        self.k1_cfg = config.get('components', {}).get('k1', {})  # Store for later use
         graph_cfg = config.get('components', {}).get('graph', {})
         model_cfg = config.get('model', {})
         
@@ -212,15 +234,15 @@ class StateCorePipeline(nn.Module):
         )
         
         # Graph Builder (Stage 3) - uses MU semantic state + positions
-        # NOTE: semantic_edges disabled by default (too restrictive for small models)
-        # NOTE: random_shortcuts disabled by default (sequential edges sufficient)
-        # Start simple: just sequential edges (i -> i+1)
+        # ENABLED: Semantic edges create connections based on cosine similarity of MU Identity blocks
+        # ENABLED: Random shortcuts provide small-world long-range connections
+        # This allows "capital" ↔ "India" and "is" ↔ "capital" semantic routing
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
-            enable_semantic=graph_cfg.get('semantic_edges', False),  # FIXED: Disable by default
-            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.0) > 0,  # FIXED: Disable by default
-            semantic_threshold=graph_cfg.get('semantic_threshold', 0.3),
-            shortcut_prob=graph_cfg.get('random_shortcuts', 0.0)  # FIXED: 0 by default
+            enable_semantic=graph_cfg.get('semantic_edges', True),  # ENABLED: Semantic routing active
+            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.05) > 0,  # ENABLED: Small-world shortcuts
+            semantic_threshold=graph_cfg.get('semantic_threshold', 0.3),  # Lower threshold for more edges
+            shortcut_prob=graph_cfg.get('random_shortcuts', 0.05)  # 5% probability for shortcuts
         )
         self.graph_mask_converter = GraphMaskConverter()
         
@@ -231,12 +253,14 @@ class StateCorePipeline(nn.Module):
         dropout = model_cfg.get('dropout', 0.1)
         
         # State Projector (Replaces simple Linear input_proj)
-        # Separate projection for Semantic and Temporal
+        # Supports two modes: 'concat' (TEMPORAL-style, RECOMMENDED) or 'add' (original)
+        combination_mode = model_cfg.get('combination_mode', 'concat')  # Default to concat (proven in TEMPORAL)
         self.state_projector = StateProjector(
             semantic_dim=self.embed_dim,
             temporal_dim=self.time_dim,
             compute_dim=hidden_dim,
-            dropout=dropout
+            dropout=dropout,
+            combination_mode=combination_mode
         )
 
         # State Update Operators (NOT Transformer layers - computation primitives)
@@ -260,7 +284,15 @@ class StateCorePipeline(nn.Module):
     def _init_k1_adapter(self):
         """Initialize K-1 adapter (called after model is built)."""
         if self.k1_adapter is None:
-            self.k1_adapter = K1Adapter(self)
+            # Get K-1 configuration
+            analysis_only = self.k1_cfg.get('analysis_only', True)  # Default to True (RECOMMENDED)
+            use_hierarchical_tree = self.k1_cfg.get('use_hierarchical_tree', False)
+
+            self.k1_adapter = K1Adapter(
+                self,
+                use_hierarchical_tree=use_hierarchical_tree,
+                analysis_only=analysis_only
+            )
             
     def forward(
         self,
@@ -304,15 +336,15 @@ class StateCorePipeline(nn.Module):
             state.temporal_state if self.stage_controller.temporal_enabled else None
         )
         
-        # === Step 4: Graph Construction (uses MU Identity + positions) ===
+        # === Step 4: Graph Construction (uses full MU semantic state) ===
         attention_mask = None
         if self.stage_controller.graph_enabled:
-            # Get MU Identity block for semantic similarity
-            mu_identity = state.get_mu_identity_block()  # [B, T, 4]
+            # Get full 64D MU semantic state for semantic similarity
+            mu_semantic = state.get_mu_identity_block()  # [B, T, 64] - full semantic state
             
             graph = self.graph_builder.build_graph(
                 seq_len=T,
-                semantic_state=mu_identity,  # Only Identity block
+                semantic_state=mu_semantic,  # Full 64D semantic state for cosine similarity
                 batch_size=B
             )
             attention_mask = self.graph_mask_converter.convert_to_additive(
