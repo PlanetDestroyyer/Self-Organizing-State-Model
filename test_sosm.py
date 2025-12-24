@@ -321,7 +321,8 @@ def main():
                 'vocab_size': VOCAB_SIZE,
                 'embed_dim': 64,
                 'max_seq_len': SEQ_LEN,
-                'use_full_model': False,  # Start simple
+                'use_full_model': True,  # ENABLED: 16-block semantic attention
+                'n_layers': 2,  # Number of block attention layers
             },
             'temporal': {
                 'time_dim': 32,
@@ -334,13 +335,13 @@ def main():
                 'enabled': True,  # ENABLED
                 'sequential_edges': True,
                 'semantic_edges': True,  # ENABLED
-                'semantic_threshold': 0.3,  # Permissive
-                'random_shortcuts': 0.05,  # 5% shortcuts
+                'semantic_threshold': 0.15,  # LOWERED: More permissive for richer semantic graphs
+                'random_shortcuts': 0.08,  # INCREASED: 8% shortcuts for better connectivity
             }
         },
         'model': {
-            'hidden_dim': 512,
-            'n_layers': 4,
+            'hidden_dim': 768,  # INCREASED: More capacity for complex patterns
+            'n_layers': 6,  # INCREASED: Deeper model for better representations
             'n_heads': 8,
             'dropout': 0.1,
             'combination_mode': 'concat',
@@ -350,9 +351,10 @@ def main():
     pipeline = StateCorePipeline(config).to(device)
     n_params = sum(p.numel() for p in pipeline.parameters())
     print(f"✅ SOSM initialized: {n_params / 1e6:.2f}M parameters")
-    print(f"   - MU: 16 semantic blocks (64D)")
+    print(f"   - MU: 16 semantic blocks with full attention (64D)")
     print(f"   - TEMPORAL: Self-learning (32D)")
-    print(f"   - Graph: Semantic edges enabled (threshold=0.3)")
+    print(f"   - Graph: Semantic edges enabled (threshold=0.15, shortcuts=8%)")
+    print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers")
     print(f"   - K-1: Analysis mode")
     print()
     
