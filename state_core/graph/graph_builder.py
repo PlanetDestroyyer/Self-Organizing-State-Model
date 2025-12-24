@@ -29,7 +29,9 @@ class GraphBuilder:
         semantic_k: int = 5,  # NEW: Top-K edges per token
         semantic_method: str = 'topk',  # NEW: 'topk' or 'threshold'
         shortcut_prob: float = 0.05,
-        bidirectional: bool = True
+        bidirectional: bool = True,
+        use_mutual_knn: bool = True,  # PHASE 1: Mutual k-NN filtering
+        streaming_topk: bool = True  # PHASE 1: Streaming Top-K (avoid T×T matrix)
     ):
         """
         Initialize graph builder.
@@ -52,6 +54,8 @@ class GraphBuilder:
         self.semantic_method = semantic_method
         self.shortcut_prob = shortcut_prob
         self.bidirectional = bidirectional
+        self.use_mutual_knn = use_mutual_knn  # PHASE 1
+        self.streaming_topk = streaming_topk  # PHASE 1
     
     def build_graph(
         self,
@@ -121,7 +125,77 @@ class GraphBuilder:
         """
         Build top-K semantic edges per token.
         
-        Each token connects to its K most similar tokens (excluding self and adjacent).
+        PHASE 1: Uses streaming Top-K to avoid materializing full T×T matrix.
+        Memory: O(T×K) instead of O(T²)
+        """
+        if self.streaming_topk:
+            return self._streaming_topk(semantic_state, seq_len)
+        else:
+            return self._materialized_topk(semantic_state, seq_len)
+    
+    def _streaming_topk(
+        self,
+        semantic_state: torch.Tensor,
+        seq_len: int
+    ) -> List[Tuple[int, int]]:
+        """
+        PHASE 1: Streaming Top-K - compute similarities row-by-row.
+        Avoids creating full T×T matrix.
+        """
+        edges = []
+        
+        # Use first batch item
+        state = semantic_state[0] if semantic_state.dim() == 3 else semantic_state
+        
+        # Normalize once
+        state_norm = F.normalize(state, dim=-1)  # [T, d]
+        
+        # For each token, compute similarities with all others (one row only!)
+        for i in range(seq_len):
+            query = state_norm[i]  # [d]
+            
+            # Compute similarities with all others (one row only!)
+            sims = (state_norm @ query)  # [T] - NOT [T, T]
+            
+            # Mask self and adjacent
+            sims[i] = -float('inf')
+            if i > 0:
+                sims[i-1] = -float('inf')
+            if i < seq_len - 1:
+                sims[i+1] = -float('inf')
+            
+            # Top-K
+            k = min(self.semantic_k, seq_len - 3)
+            if k > 0:
+                top_k_sim, top_k_idx = sims.topk(k)
+                
+                for j_idx, sim_val in zip(top_k_idx, top_k_sim):
+                    j = j_idx.item()
+                    
+                    # Optional minimum threshold
+                    if self.semantic_threshold > 0 and sim_val < self.semantic_threshold:
+                        continue
+                    
+                    # Add edge (only once per pair)
+                    if j > i:
+                        edges.append((i, j))
+                        if self.bidirectional:
+                            edges.append((j, i))
+        
+        # PHASE 1: Apply mutual k-NN filtering
+        if self.use_mutual_knn:
+            edges = self._mutual_knn_filter(edges)
+        
+        return edges
+    
+    def _materialized_topk(
+        self,
+        semantic_state: torch.Tensor,
+        seq_len: int
+    ) -> List[Tuple[int, int]]:
+        """
+        Original Top-K implementation (for comparison).
+        Creates full T×T similarity matrix.
         """
         edges = []
         
@@ -204,6 +278,28 @@ class GraphBuilder:
         
         return edges
     
+    def _mutual_knn_filter(self, edges: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        """
+        PHASE 1: Mutual k-NN filtering.
+        Keep only bidirectional edges (i→j AND j→i exist).
+        
+        Benefits:
+        - Reduces hub tokens (high-degree nodes)
+        - Higher precision edges
+        - Typically 20-30% edge reduction
+        """
+        edge_set = set(edges)
+        mutual_edges = []
+        
+        for (i, j) in edges:
+            # Check if reverse edge also exists
+            if (j, i) in edge_set and i < j:  # Avoid duplicates
+                mutual_edges.append((i, j))
+                if self.bidirectional:
+                    mutual_edges.append((j, i))
+        
+        return mutual_edges
+    
     def update_config(
         self,
         enable_semantic: Optional[bool] = None,
@@ -211,7 +307,9 @@ class GraphBuilder:
         semantic_threshold: Optional[float] = None,
         semantic_k: Optional[int] = None,
         semantic_method: Optional[str] = None,
-        shortcut_prob: Optional[float] = None
+        shortcut_prob: Optional[float] = None,
+        use_mutual_knn: Optional[bool] = None,  # PHASE 1
+        streaming_topk: Optional[bool] = None  # PHASE 1
     ):
         """Update graph builder configuration."""
         if enable_semantic is not None:
@@ -226,3 +324,7 @@ class GraphBuilder:
             self.semantic_method = semantic_method
         if shortcut_prob is not None:
             self.shortcut_prob = shortcut_prob
+        if use_mutual_knn is not None:  # PHASE 1
+            self.use_mutual_knn = use_mutual_knn
+        if streaming_topk is not None:  # PHASE 1
+            self.streaming_topk = streaming_topk

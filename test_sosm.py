@@ -54,12 +54,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def train_epoch(pipeline, loader, optimizer, epoch: int):
-    """Train for one epoch."""
+def train_epoch(pipeline, loader, optimizer, epoch: int, scaler=None):
+    """
+    Train for one epoch.
+    
+    PHASE 1: Supports mixed precision training and K-1 sampling.
+    """
     pipeline.train()
     total_loss = 0
     n_batches = 0
     start_time = time.time()
+    
+    use_amp = scaler is not None  # PHASE 1: Mixed precision flag
     
     for batch_idx, (input_ids, labels, domains) in enumerate(loader):
         input_ids = input_ids.to(device)
@@ -67,22 +73,40 @@ def train_epoch(pipeline, loader, optimizer, epoch: int):
         
         optimizer.zero_grad()
         
-        # Forward through SOSM
-        logits, state = pipeline(input_ids)
+        # PHASE 1: Mixed precision forward pass
+        if use_amp:
+            from torch.cuda.amp import autocast
+            with autocast():
+                logits, state = pipeline(input_ids)
+                loss = F.cross_entropy(
+                    logits.view(-1, pipeline.vocab_size),
+                    labels.view(-1),
+                    ignore_index=-100
+                )
+        else:
+            # Forward through SOSM
+            logits, state = pipeline(input_ids)
+            loss = F.cross_entropy(
+                logits.view(-1, pipeline.vocab_size),
+                labels.view(-1),
+                ignore_index=-100
+            )
         
-        loss = F.cross_entropy(
-            logits.view(-1, pipeline.vocab_size),
-            labels.view(-1),
-            ignore_index=-100
-        )
+        # PHASE 1: Mixed precision backward pass
+        if use_amp:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(pipeline.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(pipeline.parameters(), 1.0)
+            optimizer.step()
         
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(pipeline.parameters(), 1.0)
-        
-        # K-1 hierarchical updates
-        responsibility = pipeline.backward_with_k1(loss.detach(), state, batch_idx)
-        
-        optimizer.step()
+        # PHASE 1: K-1 sampling (every 10 steps instead of every step)
+        if batch_idx % 10 == 0:
+            responsibility = pipeline.backward_with_k1(loss.detach(), state, batch_idx)
         
         total_loss += loss.item()
         n_batches += 1
@@ -339,11 +363,13 @@ def main():
                 'semantic_k': 5,  # Each token connects to 5 most similar
                 'semantic_threshold': 0.05,  # Optional minimum threshold
                 'random_shortcuts': 0.20,  # Small-world optimal (20%)
+                'use_mutual_knn': True,  # PHASE 1: Mutual k-NN filtering
+                'streaming_topk': True,  # PHASE 1: Streaming Top-K (O(T×K) memory)
             }
         },
         'model': {
-            'hidden_dim': 768,  # INCREASED: More capacity for complex patterns
-            'n_layers': 6,  # INCREASED: Deeper model for better representations
+            'hidden_dim': 896,  # PHASE 1: Increased to compensate for fewer layers
+            'n_layers': 4,  # PHASE 1: Reduced from 6 (graph does heavy lifting)
             'n_heads': 8,
             'dropout': 0.1,
             'combination_mode': 'concat',
@@ -355,9 +381,9 @@ def main():
     print(f"✅ SOSM initialized: {n_params / 1e6:.2f}M parameters")
     print(f"   - MU: 16 semantic blocks with full attention (64D)")
     print(f"   - TEMPORAL: Self-learning (32D)")
-    print(f"   - Graph: Top-K semantic (K=5, shortcuts=20%)")
-    print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers")
-    print(f"   - K-1: Analysis mode")
+    print(f"   - Graph: Top-K (K=5) + Streaming + Mutual k-NN [PHASE 1]")
+    print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers [PHASE 1: Reduced]")
+    print(f"   - K-1: Analysis mode [PHASE 1: Sampled every 10 steps]")
     print()
     
     # Training
@@ -374,6 +400,13 @@ def main():
         # Optimizer
         optimizer = torch.optim.AdamW(pipeline.parameters(), lr=3e-4, weight_decay=0.01)
         
+        # PHASE 1: Mixed precision scaler
+        from torch.cuda.amp import GradScaler
+        scaler = GradScaler() if device.type == 'cuda' else None
+        if scaler:
+            print("✅ Mixed precision (FP16) enabled [PHASE 1]")
+        print()
+        
         # Training loop
         print("-" * 70)
         print("TRAINING")
@@ -382,7 +415,7 @@ def main():
         for epoch in range(EPOCHS):
             print(f"\nEpoch {epoch + 1}/{EPOCHS}")
             
-            train_loss = train_epoch(pipeline, train_loader, optimizer, epoch)
+            train_loss = train_epoch(pipeline, train_loader, optimizer, epoch, scaler=scaler)
             test_loss, perplexity = evaluate(pipeline, test_loader)
             
             print(f"  Train Loss: {train_loss:.4f}")
