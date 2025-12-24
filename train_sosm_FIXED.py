@@ -209,13 +209,28 @@ def test_generation(model, tokenizer, device, stage):
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Train SOSM with configurable components')
+
+    # Basic training args
     parser.add_argument('--stage', type=int, default=0, help='Training stage (0-3)')
     parser.add_argument('--epochs', type=int, default=3, help='Number of epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
     parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate')
     parser.add_argument('--seq-len', type=int, default=256, help='Sequence length')
     parser.add_argument('--device', type=str, default='cuda', help='Device')
+
+    # NEW: Component configuration flags
+    parser.add_argument('--use-full-mu', action='store_true',
+                       help='Use full MU with 16 block attention layers (slower but richer)')
+    parser.add_argument('--combination-mode', type=str, default='concat', choices=['concat', 'add'],
+                       help='How to combine semantic+temporal: concat (RECOMMENDED) or add')
+    parser.add_argument('--k1-analysis-only', action='store_true', default=True,
+                       help='K-1 computes attribution but does NOT scale gradients (RECOMMENDED)')
+    parser.add_argument('--k1-scale-gradients', dest='k1_analysis_only', action='store_false',
+                       help='K-1 scales gradients based on attribution (experimental)')
+    parser.add_argument('--enable-semantic-edges', action='store_true',
+                       help='Enable semantic similarity edges in graph routing')
+
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -248,23 +263,32 @@ def main():
         pin_memory=True
     )
 
-    # Create model with FIXED defaults
+    # Create model with FIXED defaults + command-line overrides
     print(f"\nInitializing SOSM (Stage {args.stage})...")
+    print(f"Configuration:")
+    print(f"  - MU: {'Full 16-block' if args.use_full_mu else 'Simple embedding'}")
+    print(f"  - Combination mode: {args.combination_mode}")
+    print(f"  - K-1 mode: {'Analysis-only' if args.k1_analysis_only else 'Gradient scaling'}")
+    print(f"  - Semantic edges: {'Enabled' if args.enable_semantic_edges else 'Disabled'}")
+
     config = {
         'stage': args.stage,
         'components': {
             'mu': {
                 'vocab_size': 50257,
-                'embed_dim': 512,  # INCREASED from 64
-                'use_full_model': False,  # Start simple
+                # Full MU requires 64D for 8×8 structure, simple MU can use 512D
+                'embed_dim': 64 if args.use_full_mu else 512,
+                'use_full_model': args.use_full_mu,  # Command-line configurable
             },
             'temporal': {
                 'time_dim': 256,  # INCREASED from 32
             },
-            'k1': {},
+            'k1': {
+                'analysis_only': args.k1_analysis_only,  # RECOMMENDED: True
+            },
             'graph': {
                 'sequential_edges': True,
-                'semantic_edges': False,  # Disabled
+                'semantic_edges': args.enable_semantic_edges,  # Command-line configurable
                 'random_shortcuts': 0.0,  # Disabled
             }
         },
@@ -272,7 +296,8 @@ def main():
             'hidden_dim': 1024,  # INCREASED from 256
             'n_layers': 6,
             'n_heads': 8,  # INCREASED from 4
-            'dropout': 0.1
+            'dropout': 0.1,
+            'combination_mode': args.combination_mode,  # NEW: concat (default) or add
         }
     }
 

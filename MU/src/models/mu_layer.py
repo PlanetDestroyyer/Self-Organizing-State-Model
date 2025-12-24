@@ -70,13 +70,9 @@ class MUAttentionLayer(nn.Module):
 
         # Sensitivity mask (controls how much each position can change)
         if sensitivity_mask is None:
-            # Default sensitivity mask based on semantic roles
-            sensitivity_mask = torch.tensor([
-                [0.1, 0.01, 0.01, 0.7],   # Identity (low), Invariants (very low), Relation (high)
-                [0.7, 0.7, 0.7, 0.9],      # Relations (high), Context start (very high)
-                [0.9, 0.9, 0.9, 0.6],      # Context (very high), Transform (medium-high)
-                [0.6, 0.5, 0.5, 0.1]       # Transform (medium-high), Compositional (medium), Global (low)
-            ], dtype=torch.float32)
+            # FIXED: Use all-ones mask (no hardcoded restrictions)
+            # Let the learned dynamic sensitivity (DynamicBlockSensitivity) handle gating
+            sensitivity_mask = torch.ones(r, c, dtype=torch.float32)
 
         self.register_buffer('sensitivity_mask', sensitivity_mask)
 

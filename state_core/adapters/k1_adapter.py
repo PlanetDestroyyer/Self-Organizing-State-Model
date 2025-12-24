@@ -29,18 +29,22 @@ class K1Adapter:
     def __init__(
         self,
         model: nn.Module,
-        use_hierarchical_tree: bool = False
+        use_hierarchical_tree: bool = False,
+        analysis_only: bool = False
     ):
         """
         Initialize K-1 adapter.
-        
+
         Args:
             model: The model whose gradients to intercept
             use_hierarchical_tree: If True, use K-1's HierarchicalTree directly
+            analysis_only: If True, compute attribution but DON'T scale gradients
+                          (Recommended: get interpretability without interfering with Adam)
         """
         self.model = model
         self.use_hierarchical_tree = use_hierarchical_tree
-        
+        self.analysis_only = analysis_only
+
         if use_hierarchical_tree:
             try:
                 from k1_system.core import HierarchicalTree
@@ -50,10 +54,13 @@ class K1Adapter:
                 self._k1_available = False
         else:
             self._k1_available = False
-        
+
         # Tracking
         self._last_attribution: Dict[str, Any] = {}
         self._update_history: List[Dict[str, Any]] = []
+
+        if analysis_only:
+            print("✓ K-1 in ANALYSIS-ONLY mode: Computing attribution without scaling gradients")
     
     def apply_hierarchical_updates(
         self,
@@ -62,51 +69,60 @@ class K1Adapter:
     ) -> Dict[str, Any]:
         """
         Apply K-1 style hierarchical error attribution.
-        
+
         Must be called AFTER loss.backward().
-        
+
         Args:
             loss_tensor: The loss tensor (gradients already computed)
             current_step: Current training step
-            
+
         Returns:
             Attribution info dict with:
                 - error_path: List of responsible modules
                 - nodes_updated: Number of modules updated
                 - update_pct: Percentage of model updated
+                - analysis_only: Whether gradient scaling was skipped
         """
         if self._k1_available and hasattr(self.model, 'fast_hierarchical_step'):
             # Use K-1's built-in method
-            self.model.fast_hierarchical_step(loss_tensor, current_step)
-            attribution = self.model.get_error_attribution()
+            # NOTE: fast_hierarchical_step always scales gradients (can't disable easily)
+            # So for analysis_only mode, we just don't call it
+            if not self.analysis_only:
+                self.model.fast_hierarchical_step(loss_tensor, current_step)
+            attribution = self.model.get_error_attribution() if hasattr(self.model, 'get_error_attribution') else {}
         else:
             # Simplified gradient-based attribution
-            attribution = self._simple_gradient_attribution(current_step)
-        
+            attribution = self._simple_gradient_attribution(current_step, scale_gradients=not self.analysis_only)
+
+        attribution['analysis_only'] = self.analysis_only
+
         self._last_attribution = attribution
         self._update_history.append({
             'step': current_step,
             **attribution
         })
-        
+
         return attribution
     
-    def _simple_gradient_attribution(self, current_step: int) -> Dict[str, Any]:
+    def _simple_gradient_attribution(self, current_step: int, scale_gradients: bool = True) -> Dict[str, Any]:
         """
         Simple gradient-proportional attribution (K-1 style).
-        
-        Updates parameters proportionally to their gradient magnitude.
+
+        Args:
+            current_step: Current training step
+            scale_gradients: If True, apply proportional scaling (default K-1 behavior)
+                           If False, only compute attribution (analysis-only mode)
         """
         # Collect all gradients
         grad_norms = {}
         total_grad = 0.0
-        
+
         for name, param in self.model.named_parameters():
             if param.grad is not None:
                 norm = param.grad.norm().item()
                 grad_norms[name] = norm
                 total_grad += norm
-        
+
         if total_grad == 0:
             return {
                 'error_path': [],
@@ -114,10 +130,10 @@ class K1Adapter:
                 'update_pct': 0.0,
                 'total_nodes': len(grad_norms)
             }
-        
+
         # Find top contributors (highest gradient = most responsible)
         sorted_params = sorted(grad_norms.items(), key=lambda x: -x[1])
-        
+
         # Calculate cumulative contribution
         cumulative = 0.0
         error_path = []
@@ -132,10 +148,11 @@ class K1Adapter:
             # Stop when we've accounted for 90% of gradients
             if cumulative >= 0.9:
                 break
-        
-        # Apply proportional scaling to gradients
-        self._apply_proportional_scaling(grad_norms, total_grad)
-        
+
+        # Apply proportional scaling to gradients (ONLY if not analysis-only)
+        if scale_gradients:
+            self._apply_proportional_scaling(grad_norms, total_grad)
+
         return {
             'error_path': error_path,
             'nodes_updated': len(error_path),

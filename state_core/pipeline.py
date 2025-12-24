@@ -289,7 +289,7 @@ class StateCorePipeline(nn.Module):
             use_hierarchical_tree = self.k1_cfg.get('use_hierarchical_tree', False)
 
             self.k1_adapter = K1Adapter(
-                self,
+                model=self,  # Pass the pipeline as model
                 use_hierarchical_tree=use_hierarchical_tree,
                 analysis_only=analysis_only
             )

@@ -301,34 +301,38 @@ class MUAdapter(nn.Module):
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         """
         Get semantic state from token IDs.
-        
+
         Args:
             token_ids: [B, T]
-            
+
         Returns:
-            semantic_state: [B, T, 64] or [B, T, 8, 8]
+            semantic_state: [B, T, embed_dim] or [B, T, 8, 8]
         """
         B, T = token_ids.shape
-        
+
         # Initial embedding
-        M = self.token_to_mu(token_ids)  # [B, T, 64]
-        
+        M = self.token_to_mu(token_ids)  # [B, T, embed_dim]
+
         if self._full_model:
+            # Full model requires 64D (8×8 structure)
+            if self.embed_dim != 64:
+                raise ValueError(f"Full MU model requires embed_dim=64 for 8×8 structure, got {self.embed_dim}")
+
             # Reshape to 8×8 for block processing
             M = M.view(B, T, 8, 8)
-            
+
             # Process through block attention layers
             for layer in self.block_layers:
                 M = layer(M, token_ids)
-            
+
             # Flatten if needed
             if self.flatten_output:
                 M = M.view(B, T, 64)
         else:
-            # Simple embedding path
-            if not self.flatten_output:
-                M = M.view(B, T, 8, 8)
-        
+            # Simple embedding path - use configured dimension
+            # No reshaping needed, just return as [B, T, embed_dim]
+            pass
+
         return M
     
     def get_vocab_size(self) -> int:
