@@ -1,7 +1,7 @@
 # SOSM Implementation Phases: Complete Roadmap 🗺️
 
-**5-Phase Plan**: From Quick Wins to Advanced Features  
-**Timeline**: 6-8 weeks  
+**6-Phase Plan**: From Quick Wins to Production  
+**Timeline**: 9-10 weeks  
 **Last Updated**: 2025-12-24
 
 ---
@@ -14,7 +14,8 @@
 | **Phase 2** | Quality & Interpretability | Week 2 | Low | +8-10% accuracy |
 | **Phase 3** | Scale & Advanced Features | Week 3-4 | Medium | 2× speed, 50% memory |
 | **Phase 4** | Long-Range & Efficiency | Week 5-6 | Medium | Infinite context, 6× params |
-| **Phase 5** | Production & Deployment | Week 7-8 | Low | Multi-GPU, serving |
+| **Phase 5** | Advanced Architecture (Mamba/RoPE/Graphormer) | Week 7-8 | Very High | 5-10× throughput |
+| **Phase 6** | Production & Deployment | Week 9-10 | Low | Multi-GPU, serving |
 
 ---
 
@@ -910,304 +911,9 @@ class BlockSpecializedAttention(nn.Module):
 
 ---
 
-# Phase 5: Production & Deployment 🏭
+# Phase 5: Advanced Architecture - Mamba, RoPE & Graphormer Fusion 🔬
 
-**Timeline**: Week 7-8 (10-14 days)  
-**Goal**: Production-ready, multi-GPU, serving infrastructure  
-**Risk Level**: 🟢 Low
-
-## Items
-
-### 5.1 Multi-GPU Training (DataParallel)
-**Priority**: 🔴 CRITICAL  
-**Time**: 6-8 hours  
-**Complexity**: Medium
-
-**Code**:
-```python
-import torch.nn as nn
-from torch.nn.parallel import DataParallel
-
-# Wrap model
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs")
-    model = DataParallel(model)
-
-# Training loop unchanged
-for batch in train_loader:
-    # Automatically splits batch across GPUs
-    logits, state = model(input_ids)
-    loss = criterion(logits, labels)
-    loss.backward()
-    optimizer.step()
-```
-
-**Benefits**:
-- ✅ Linear speedup with # GPUs
-- ✅ Handle larger batches
-
-**File**: `test_sosm.py`  
-**Test**: 2 GPU vs 4 GPU speedup
-
----
-
-### 5.2 Model Quantization (INT8)
-**Priority**: 🟡 MEDIUM  
-**Time**: 4-6 hours  
-**Complexity**: Medium
-
-**Code**:
-```python
-import torch.quantization
-
-# Quantize model
-model_fp32 = copy.deepcopy(model)
-model_int8 = torch.quantization.quantize_dynamic(
-    model_fp32,
-    {nn.Linear},
-    dtype=torch.qint8
-)
-
-# Inference
-with torch.no_grad():
-    output = model_int8(input_ids)
-```
-
-**Benefits**:
-- ✅ 4× smaller model
-- ✅ 2-3× faster inference
-- ✅ -1% accuracy (acceptable)
-
-**File**: `deployment/quantize.py` (new)  
-**Test**: Measure accuracy drop
-
----
-
-### 5.3 ONNX Export
-**Priority**: 🟡 MEDIUM  
-**Time**: 4-6 hours  
-**Complexity**: Medium
-
-**Code**:
-```python
-import torch.onnx
-
-# Export to ONNX
-dummy_input = torch.randint(0, 50257, (1, 64))
-torch.onnx.export(
-    model,
-    dummy_input,
-    "sosm.onnx",
-    export_params=True,
-    opset_version=14,
-    input_names=['input_ids'],
-    output_names=['logits'],
-    dynamic_axes={
-        'input_ids': {0: 'batch', 1: 'sequence'},
-        'logits': {0: 'batch', 1: 'sequence'}
-    }
-)
-
-# Load in ONNX Runtime
-import onnxruntime as ort
-session = ort.InferenceSession("sosm.onnx")
-```
-
-**Benefits**:
-- ✅ Deploy anywhere (C++, JS, mobile)
-- ✅ Optimized inference
-
-**File**: `deployment/export_onnx.py` (new)  
-**Test**: Verify outputs match PyTorch
-
----
-
-### 5.4 REST API Server
-**Priority**: 🟡 MEDIUM  
-**Time**: 8-10 hours  
-**Complexity**: Medium
-
-**Code**:
-```python
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI()
-
-class PredictionRequest(BaseModel):
-    text: str
-    max_length: int = 50
-
-@app.post("/predict")
-async def predict(request: PredictionRequest):
-    # Tokenize
-    tokens = tokenizer.encode(request.text)
-    
-    # Generate
-    with torch.no_grad():
-        output = model.generate(
-            torch.tensor([tokens]),
-            max_length=request.max_length
-        )
-    
-    # Decode
-    text = tokenizer.decode(output[0])
-    
-    return {"generated_text": text}
-
-# Run: uvicorn server:app --host 0.0.0.0 --port 8000
-```
-
-**Benefits**:
-- ✅ HTTP API for inference
-- ✅ Easy integration
-
-**File**: `deployment/server.py` (new)  
-**Test**: Load test with locust
-
----
-
-### 5.5 Model Distillation
-**Priority**: 🟢 LOW  
-**Time**: 12-16 hours  
-**Complexity**: High
-
-**Code**:
-```python
-class DistillationLoss(nn.Module):
-    def __init__(self, alpha=0.5, temperature=2.0):
-        super().__init__()
-        self.alpha = alpha
-        self.T = temperature
-    
-    def forward(self, student_logits, teacher_logits, labels):
-        # Hard loss (student vs labels)
-        hard_loss = F.cross_entropy(student_logits, labels)
-        
-        # Soft loss (student vs teacher)
-        soft_loss = F.kl_div(
-            F.log_softmax(student_logits / self.T, dim=-1),
-            F.softmax(teacher_logits / self.T, dim=-1),
-            reduction='batchmean'
-        ) * (self.T ** 2)
-        
-        return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
-
-# Train smaller student model
-student = create_small_sosm(n_layers=2, hidden_dim=384)
-teacher = load_pretrained_sosm()
-
-for batch in train_loader:
-    with torch.no_grad():
-        teacher_logits = teacher(input_ids)
-    
-    student_logits = student(input_ids)
-    loss = distillation_loss(student_logits, teacher_logits, labels)
-    loss.backward()
-    optimizer.step()
-```
-
-**Benefits**:
-- ✅ 5-10× smaller model
-- ✅ 3-5× faster inference
-- ✅ 90-95% of teacher accuracy
-
-**File**: `training/distillation.py` (new)  
-**Test**: Compare student vs teacher accuracy
-
----
-
-### 5.6 Monitoring & Logging
-**Priority**: 🟡 MEDIUM  
-**Time**: 4-6 hours  
-**Complexity**: Low
-
-**Code**:
-```python
-import wandb
-from prometheus_client import Counter, Histogram
-
-# Metrics
-prediction_counter = Counter('predictions_total', 'Total predictions')
-latency_histogram = Histogram('prediction_latency_seconds', 'Prediction latency')
-
-# W&B logging
-wandb.init(project="sosm")
-
-for step, batch in enumerate(train_loader):
-    logits, state = model(input_ids)
-    loss = criterion(logits, labels)
-    
-    # Log to W&B
-    wandb.log({
-        'loss': loss.item(),
-        'perplexity': torch.exp(loss).item(),
-        'num_edges': state.routing_state['num_edges'],
-        'semantic_edges': state.routing_state['edge_types']['semantic'],
-        'avg_degree': avg_degree,
-    })
-```
-
-**Benefits**:
-- ✅ Real-time monitoring
-- ✅ Debugging support
-
-**File**: `utils/monitoring.py` (new)  
-**Test**: Set up dashboard
-
----
-
-## Phase 5 Metrics
-
-**Expected Results**:
-- Multi-GPU: 4× training speedup
-- Quantization: 4× smaller, 2× faster
-- API: 100 req/sec throughput
-- Distilled model: 10× smaller, 95% accuracy
-
----
-
-# Summary Timeline
-
-| Week | Phase                        | Key Deliverables                                    |
-|------|------------------------------|-----------------------------------------------------|
-| 1    | Phase 1: Quick Wins          | Streaming Top-K, Mutual k-NN, Mixed precision       |
-| 2    | Phase 2: Quality             | Blockwise sim, Adaptive K, Edge provenance          |
-| 3-4  | Phase 3: Scale               | TEMPORAL gate, Sparse attention, Factorized embed   |
-| 5-6  | Phase 4: Long-Range          | HNSW memory, LoRA, KV cache                         |
-| 7-8  | Phase 5: Production          | Multi-GPU, Quantization, API, Monitoring            |
-
----
-
-# Risk Mitigation
-
-**For each phase**:
-1. ✅ Implement items sequentially
-2. ✅ Test after each item
-3. ✅ Benchmark before moving to next
-4. ✅ Maintain baseline comparison
-5. ✅ Document any regressions
-
-**Rollback plan**:
-- All changes behind config flags
-- Can revert to baseline anytime
-- Git branches per phase
-
----
-
-# Success Criteria
-
-**Phase 1**: 45% faster, 30% less memory, perplexity ≤ +0.5%  
-**Phase 2**: +8% accuracy, 3× faster graph building  
-**Phase 3**: 2× total speed, T=512 support  
-**Phase 4**: Infinite context, 6× fewer params  
-**Phase 5**: Multi-GPU, production API, monitoring
-
----
-
-# Phase 6: Advanced Architecture - Mamba, RoPE & Graphormer Fusion 🔬
-
-**Timeline**: Week 9-12 (3-4 weeks)  
+**Timeline**: Week 7-8 (3-4 weeks)  
 **Goal**: Harmonize Graph Transformers, SSMs, and positional embeddings for high-efficiency token flow  
 **Risk Level**: 🔴 Very High (Research-level complexity)
 
@@ -2014,7 +1720,7 @@ structural_contribution = outputs['expert_1'][structural_token_indices]
 - DePass verification
 - Extensive ablation studies
 
-### Week 9-12: Optimization & Tuning
+### Week 7-8: Optimization & Tuning
 - Triton kernel optimization
 - Hyperparameter tuning
 - Performance benchmarking
@@ -2044,3 +1750,304 @@ structural_contribution = outputs['expert_1'][structural_token_indices]
 ---
 
 **Ready to start Phase 1?** 🚀
+
+---
+
+# Phase 6: Production & Deployment 🏭
+
+**Timeline**: Week 9-10 (10-14 days)  
+**Goal**: Production-ready, multi-GPU, serving infrastructure  
+**Risk Level**: 🟢 Low
+
+## Items
+
+### 5.1 Multi-GPU Training (DataParallel)
+**Priority**: 🔴 CRITICAL  
+**Time**: 6-8 hours  
+**Complexity**: Medium
+
+**Code**:
+```python
+import torch.nn as nn
+from torch.nn.parallel import DataParallel
+
+# Wrap model
+if torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs")
+    model = DataParallel(model)
+
+# Training loop unchanged
+for batch in train_loader:
+    # Automatically splits batch across GPUs
+    logits, state = model(input_ids)
+    loss = criterion(logits, labels)
+    loss.backward()
+    optimizer.step()
+```
+
+**Benefits**:
+- ✅ Linear speedup with # GPUs
+- ✅ Handle larger batches
+
+**File**: `test_sosm.py`  
+**Test**: 2 GPU vs 4 GPU speedup
+
+---
+
+### 5.2 Model Quantization (INT8)
+**Priority**: 🟡 MEDIUM  
+**Time**: 4-6 hours  
+**Complexity**: Medium
+
+**Code**:
+```python
+import torch.quantization
+
+# Quantize model
+model_fp32 = copy.deepcopy(model)
+model_int8 = torch.quantization.quantize_dynamic(
+    model_fp32,
+    {nn.Linear},
+    dtype=torch.qint8
+)
+
+# Inference
+with torch.no_grad():
+    output = model_int8(input_ids)
+```
+
+**Benefits**:
+- ✅ 4× smaller model
+- ✅ 2-3× faster inference
+- ✅ -1% accuracy (acceptable)
+
+**File**: `deployment/quantize.py` (new)  
+**Test**: Measure accuracy drop
+
+---
+
+### 5.3 ONNX Export
+**Priority**: 🟡 MEDIUM  
+**Time**: 4-6 hours  
+**Complexity**: Medium
+
+**Code**:
+```python
+import torch.onnx
+
+# Export to ONNX
+dummy_input = torch.randint(0, 50257, (1, 64))
+torch.onnx.export(
+    model,
+    dummy_input,
+    "sosm.onnx",
+    export_params=True,
+    opset_version=14,
+    input_names=['input_ids'],
+    output_names=['logits'],
+    dynamic_axes={
+        'input_ids': {0: 'batch', 1: 'sequence'},
+        'logits': {0: 'batch', 1: 'sequence'}
+    }
+)
+
+# Load in ONNX Runtime
+import onnxruntime as ort
+session = ort.InferenceSession("sosm.onnx")
+```
+
+**Benefits**:
+- ✅ Deploy anywhere (C++, JS, mobile)
+- ✅ Optimized inference
+
+**File**: `deployment/export_onnx.py` (new)  
+**Test**: Verify outputs match PyTorch
+
+---
+
+### 5.4 REST API Server
+**Priority**: 🟡 MEDIUM  
+**Time**: 8-10 hours  
+**Complexity**: Medium
+
+**Code**:
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class PredictionRequest(BaseModel):
+    text: str
+    max_length: int = 50
+
+@app.post("/predict")
+async def predict(request: PredictionRequest):
+    # Tokenize
+    tokens = tokenizer.encode(request.text)
+    
+    # Generate
+    with torch.no_grad():
+        output = model.generate(
+            torch.tensor([tokens]),
+            max_length=request.max_length
+        )
+    
+    # Decode
+    text = tokenizer.decode(output[0])
+    
+    return {"generated_text": text}
+
+# Run: uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+**Benefits**:
+- ✅ HTTP API for inference
+- ✅ Easy integration
+
+**File**: `deployment/server.py` (new)  
+**Test**: Load test with locust
+
+---
+
+### 5.5 Model Distillation
+**Priority**: 🟢 LOW  
+**Time**: 12-16 hours  
+**Complexity**: High
+
+**Code**:
+```python
+class DistillationLoss(nn.Module):
+    def __init__(self, alpha=0.5, temperature=2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.T = temperature
+    
+    def forward(self, student_logits, teacher_logits, labels):
+        # Hard loss (student vs labels)
+        hard_loss = F.cross_entropy(student_logits, labels)
+        
+        # Soft loss (student vs teacher)
+        soft_loss = F.kl_div(
+            F.log_softmax(student_logits / self.T, dim=-1),
+            F.softmax(teacher_logits / self.T, dim=-1),
+            reduction='batchmean'
+        ) * (self.T ** 2)
+        
+        return self.alpha * hard_loss + (1 - self.alpha) * soft_loss
+
+# Train smaller student model
+student = create_small_sosm(n_layers=2, hidden_dim=384)
+teacher = load_pretrained_sosm()
+
+for batch in train_loader:
+    with torch.no_grad():
+        teacher_logits = teacher(input_ids)
+    
+    student_logits = student(input_ids)
+    loss = distillation_loss(student_logits, teacher_logits, labels)
+    loss.backward()
+    optimizer.step()
+```
+
+**Benefits**:
+- ✅ 5-10× smaller model
+- ✅ 3-5× faster inference
+- ✅ 90-95% of teacher accuracy
+
+**File**: `training/distillation.py` (new)  
+**Test**: Compare student vs teacher accuracy
+
+---
+
+### 5.6 Monitoring & Logging
+**Priority**: 🟡 MEDIUM  
+**Time**: 4-6 hours  
+**Complexity**: Low
+
+**Code**:
+```python
+import wandb
+from prometheus_client import Counter, Histogram
+
+# Metrics
+prediction_counter = Counter('predictions_total', 'Total predictions')
+latency_histogram = Histogram('prediction_latency_seconds', 'Prediction latency')
+
+# W&B logging
+wandb.init(project="sosm")
+
+for step, batch in enumerate(train_loader):
+    logits, state = model(input_ids)
+    loss = criterion(logits, labels)
+    
+    # Log to W&B
+    wandb.log({
+        'loss': loss.item(),
+        'perplexity': torch.exp(loss).item(),
+        'num_edges': state.routing_state['num_edges'],
+        'semantic_edges': state.routing_state['edge_types']['semantic'],
+        'avg_degree': avg_degree,
+    })
+```
+
+**Benefits**:
+- ✅ Real-time monitoring
+- ✅ Debugging support
+
+**File**: `utils/monitoring.py` (new)  
+**Test**: Set up dashboard
+
+---
+
+## Phase 5 Metrics
+
+**Expected Results**:
+- Multi-GPU: 4× training speedup
+- Quantization: 4× smaller, 2× faster
+- API: 100 req/sec throughput
+- Distilled model: 10× smaller, 95% accuracy
+
+---
+
+# Summary Timeline
+
+| Week | Phase                        | Key Deliverables                                    |
+|------|------------------------------|-----------------------------------------------------|
+| 1    | Phase 1: Quick Wins          | Streaming Top-K, Mutual k-NN, Mixed precision       |
+| 2    | Phase 2: Quality             | Blockwise sim, Adaptive K, Edge provenance          |
+| 3-4  | Phase 3: Scale               | TEMPORAL gate, Sparse attention, Factorized embed   |
+| 5-6  | Phase 4: Long-Range          | HNSW memory, LoRA, KV cache                         |
+| 7-8  | Phase 5: Advanced Arch       | Graph-Mamba, Diff Attention, Graph-RoPE, Soft MoE   |
+| 9-10 | Phase 6: Production          | Multi-GPU, Quantization, API, Monitoring            |
+
+---
+
+# Risk Mitigation
+
+**For each phase**:
+1. ✅ Implement items sequentially
+2. ✅ Test after each item
+3. ✅ Benchmark before moving to next
+4. ✅ Maintain baseline comparison
+5. ✅ Document any regressions
+
+**Rollback plan**:
+- All changes behind config flags
+- Can revert to baseline anytime
+- Git branches per phase
+
+---
+
+# Success Criteria
+
+**Phase 1**: 45% faster, 30% less memory, perplexity ≤ +0.5%  
+**Phase 2**: +8% accuracy, 3× faster graph building  
+**Phase 3**: 2× total speed, T=512 support  
+**Phase 4**: Infinite context, 6× fewer params  
+**Phase 5**: 5-10× throughput, 100k+ nodes, Graph-Mamba hybrid  
+**Phase 6**: Multi-GPU, production API, monitoring
+
+---
+
+
