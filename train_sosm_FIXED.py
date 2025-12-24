@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import math
 from tqdm import tqdm
 import argparse
@@ -84,7 +84,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, scaler, device, stage, 
         labels = batch['labels'].to(device)
 
         # Mixed precision forward pass
-        with autocast(device_type='cuda' if device.type == 'cuda' else 'cpu'):
+        with autocast('cuda' if device.type == 'cuda' else 'cpu'):
             logits, state = model(input_ids)
             loss = F.cross_entropy(
                 logits.reshape(-1, model.vocab_size),
