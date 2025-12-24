@@ -325,8 +325,8 @@ def main():
             }, save_path)
             print(f"  ✓ Saved checkpoint (val_loss={val_metrics['loss']:.4f})")
 
-        # Test generation every 2 epochs
-        if epoch % 2 == 0:
+        # Test generation every 2 epochs OR on final epoch
+        if epoch % 2 == 0 or epoch == args.epochs:
             test_generation(model, tokenizer, device, args.stage)
 
     print("\n" + "="*70)
