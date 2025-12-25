@@ -2,9 +2,12 @@
 torch>=2.0.0
 numpy>=1.21.0
 
-# Data Loading
-datasets>=2.14.0
+# Transformers & NLP
+transformers>=4.30.0  # For GPT2Tokenizer, used throughout
 tokenizers>=0.13.0
+
+# Data Loading
+datasets>=2.14.0  # For WikiText, Simple Wikipedia, etc.
 
 # Configuration
 pyyaml>=6.0
@@ -15,5 +18,16 @@ tqdm>=4.65.0
 # Optional: HuggingFace Hub
 huggingface-hub>=0.16.0
 
+# Optional: FlashAttention (for 2-3× speedup)
+# Requires CUDA and can be tricky to install
+# Install with: pip install flash-attn --no-build-isolation
+# If installation fails, code will automatically fall back to standard attention
+# flash-attn>=2.3.0
+
 # Optional: Experiment Tracking
 # wandb>=0.15.0
+
+# Development Dependencies (optional)
+# pytest>=7.4.0
+# black>=23.0.0
+# flake8>=6.0.0
