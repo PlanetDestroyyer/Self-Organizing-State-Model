@@ -283,6 +283,18 @@ if __name__ == '__main__':
             print("⚠️  WARNING: Graph not enabled! Enabling now...")
             pipeline.stage_controller.graph_enabled = True
         
+        # QUICK FIX: Override buggy checkpoint config
+        print("\n⚠️  APPLYING QUICK FIX: Overriding checkpoint config...")
+        print(f"   Threshold: {pipeline.graph_builder.semantic_threshold} → 0.05")
+        pipeline.graph_builder.semantic_threshold = 0.05
+        pipeline.graph_builder.semantic_k = 7
+        pipeline.graph_builder.use_mutual_knn = False
+        pipeline.graph_builder.semantic_blocks = ['I', 'R2', 'K']
+        print(f"   K: {pipeline.graph_builder.semantic_k}")
+        print(f"   Mutual k-NN: {pipeline.graph_builder.use_mutual_knn}")
+        print(f"   Blocks: {pipeline.graph_builder.semantic_blocks}")
+        print("✅ Config overridden for testing\n")
+        
         print("✅ Model loaded successfully\n")
         
         # Run test
