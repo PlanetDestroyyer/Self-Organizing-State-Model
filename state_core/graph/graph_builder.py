@@ -171,12 +171,15 @@ class GraphBuilder:
             adjacency.append((i, i))
         
         # Semantic edges based on similarity
+        provenance = []
         if self.enable_semantic and semantic_state is not None:
             # PHASE 2: Apply EMA smoothing for stable graph topology
             semantic_state_stable = self._update_ema(semantic_state)
             
             if self.semantic_method == 'topk':
-                semantic_edges = self._build_semantic_edges_topk(semantic_state_stable, seq_len)
+                semantic_edges, sem_prov = self._build_semantic_edges_topk(semantic_state_stable, seq_len)
+                if sem_prov:
+                    provenance.extend(sem_prov)
             else:
                 semantic_edges = self._build_semantic_edges_threshold(semantic_state_stable, seq_len)
             
@@ -194,7 +197,8 @@ class GraphBuilder:
             'num_edges': len(adjacency),
             'edge_types': edge_types,
             'seq_len': seq_len,
-            'batch_size': batch_size
+            'batch_size': batch_size,
+            'provenance': provenance if provenance else None  # PHASE 2.2: Include provenance
         }
     
     
@@ -217,18 +221,37 @@ class GraphBuilder:
     def _streaming_topk(
         self,
         semantic_state: torch.Tensor,
-        seq_len: int
-    ) -> List[Tuple[int, int]]:
+        seq_len: int,
+        track_provenance: bool = True  # NEW: Track block contributions
+    ) -> Tuple[List[Tuple[int, int]], Optional[List[Dict]]]:
         """
         PHASE 1: Streaming Top-K - compute similarities row-by-row.
         Avoids creating full T×T matrix.
+        
+        PHASE 2.2: Now tracks provenance (which blocks contribute to each edge)
         """
         edges = []
+        provenance = [] if track_provenance else None
         
-               # Use first batch item
+        # Use first batch item
         state = semantic_state[0] if semantic_state.dim() == 3 else semantic_state
         
-        # PHASE 2: Select semantic blocks (default: I, R2, K = 12D)
+        if track_provenance:
+            # PHASE 2.2: Extract individual block states for provenance
+            from state_core.adapters.mu_adapter import SemanticBlockLayout
+            
+            block_states = {}
+            for block_name in self.semantic_blocks:
+                # Get indices for this block in 64D vector
+                indices = SemanticBlockLayout.get_flat_indices(block_name)
+                block_states[block_name] = state[:, indices]  # [T, 4] for each 2×2 block
+            
+            # Normalize each block separately
+            block_states_norm = {}
+            for block_name, block_state in block_states.items():
+                block_states_norm[block_name] = F.normalize(block_state, dim=-1)
+        
+        # PHASE 2: Select semantic blocks for combined similarity (default: I, R2, K = 12D)
         state = self._select_semantic_blocks(state.unsqueeze(0) if state.dim() == 2 else state)
         state = state[0] if state.dim() == 3 else state  # Back to [T, d]
         
@@ -241,6 +264,14 @@ class GraphBuilder:
             
             # Compute similarities with all others (one row only!)
             sims = (state_norm @ query)  # [T] - NOT [T, T]
+            
+            # PHASE 2.2: Compute per-block similarities if tracking provenance
+            block_sims = None
+            if track_provenance:
+                block_sims = {}
+                for block_name, block_norm in block_states_norm.items():
+                    block_query = block_norm[i]  # [4]
+                    block_sims[block_name] = (block_norm @ block_query)  # [T]
             
             # Mask self and adjacent
             sims[i] = -float('inf')
@@ -266,12 +297,27 @@ class GraphBuilder:
                         edges.append((i, j))
                         if self.bidirectional:
                             edges.append((j, i))
+                        
+                        # PHASE 2.2: Track provenance
+                        if track_provenance and block_sims is not None:
+                            prov_data = {
+                                'edge': (i, j),
+                                'combined_similarity': sim_val.item(),
+                            }
+                            
+                            # Add per-block contributions
+                            for block_name in self.semantic_blocks:
+                                prov_data[f'{block_name}_similarity'] = block_sims[block_name][j].item()
+                            
+                            provenance.append(prov_data)
         
         # PHASE 1: Apply mutual k-NN filtering
         if self.use_mutual_knn:
             edges = self._mutual_knn_filter(edges)
+            # Note: provenance entries may refer to filtered edges
+            # This is OK - we track all candidates
         
-        return edges
+        return edges, provenance
     
     def _materialized_topk(
         self,
