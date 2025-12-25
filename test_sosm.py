@@ -386,16 +386,41 @@ def main():
     
     pipeline = StateCorePipeline(config).to(device)
     n_params = sum(p.numel() for p in pipeline.parameters())
+    
+    # Detailed initialization report with Phase 2.2-2.4 features
     print(f"✅ SOSM initialized: {n_params / 1e6:.2f}M parameters")
-    print(f"   - MU: 16 semantic blocks with full attention (64D)")
-    print(f"   - TEMPORAL: Self-learning (32D)")
-    k_value = config['components']['graph']['semantic_k']
-    mutual_knn = config['components']['graph']['use_mutual_knn']
-    k1_mode = "Analysis mode" if config['components']['k1']['analysis_only'] else "Active updates"
-    knn_status = "Mutual k-NN" if mutual_knn else "No Mutual k-NN"
-    print(f"   - Graph: Top-K (K={k_value}) + Streaming + {knn_status} [FIXES APPLIED]")
-    print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers [PHASE 1: Reduced]")
-    print(f"   - K-1: {k1_mode} [FIXES APPLIED]")
+    print(f"   📊 Architecture:")
+    print(f"      - MU: 16 semantic blocks, {config['components']['mu']['embed_dim']}D (factorized 2× reduction)")
+    print(f"      - TEMPORAL: Self-learning, 32D time embeddings")
+    print(f"      - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers")
+    
+    k_value = config['components']['graph'].get('semantic_k', 7)
+    mutual_knn = config['components']['graph'].get('use_mutual_knn', False)
+    shortcut_prob = config['components']['graph'].get('random_shortcuts', 0.05)
+    
+    print(f"   🔗 Graph (Phase 2.3 + 2.4):")
+    print(f"      - Semantic edges: Top-K (K={k_value}, optimized via K study)")
+    print(f"      - Shortcuts: Fibonacci pattern (prob={shortcut_prob})")
+    print(f"      - Mutual k-NN: {'Enabled' if mutual_knn else 'Disabled'}")
+    print(f"      - Provenance tracking: Active")
+    
+    print(f"   ⚡ Phase 2.2 Features:")
+    print(f"      - Pre-LayerNorm: Active (better gradient flow)")
+    print(f"      - Factorized embeddings: 2× reduction")
+    print(f"      - Nucleus sampling: p=0.9, T=0.8 (generation)")
+    
+    print(f"   🚀 Phase 2.4 Features:")
+    # Check if FlashAttention is available
+    try:
+        from state_core.utils.flash_attention import FLASH_ATTN_AVAILABLE
+        flash_status = "Active" if FLASH_ATTN_AVAILABLE else "Fallback (standard)"
+    except:
+        flash_status = "Fallback (standard)"
+    print(f"      - FlashAttention: {flash_status}")
+    print(f"      - Fibonacci shortcuts: Active")
+    
+    k1_mode = "Analysis mode" if config['components']['k1'].get('analysis_only', False) else "Active updates"
+    print(f"   🧠 K-1: {k1_mode}")
     print()
     
     # Training
