@@ -348,11 +348,34 @@ def load_simple_wikipedia(
     # Enable shuffle for any train split (including slices like 'train[:90%]')
     do_shuffle = split.startswith('train')
     
+    def collate_fn(batch):
+        """
+        Custom collate function to match SOSM pipeline expectation.
+        Returns: (input_ids, labels, domains)
+        """
+        # Stack input_ids
+        input_ids = torch.stack([b['input_ids'] for b in batch])
+        
+        # Create shifted labels (standard causal LH)
+        # Inputs: [0:-1], Labels: [1:]
+        # Note: input_ids from tokenize_function are padded to max_length
+        # We slice to ensure we have targets for next-token prediction
+        
+        inputs = input_ids[:, :-1]
+        labels = input_ids[:, 1:].clone()
+        
+        # IMPORTANT: SOSM pipeline expects (input_ids, labels, domains)
+        # Domains info
+        domains = ['simple_wiki'] * len(batch)
+        
+        return inputs, labels, domains
+    
     dataloader = TorchDataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=do_shuffle,
-        num_workers=0
+        num_workers=0,
+        collate_fn=collate_fn
     )
     
     return dataloader
