@@ -267,9 +267,20 @@ if __name__ == '__main__':
         checkpoint = torch.load(checkpoint_path)
         config = checkpoint['config']
         
+        # CRITICAL FIX: Ensure graph is enabled for testing
+        if 'pipeline' in config and 'graph' in config['pipeline']:
+            config['pipeline']['graph']['enabled'] = True
+            print(f"Graph config: enabled={config['pipeline']['graph']['enabled']}, K={config['pipeline']['graph'].get('semantic_k', 'N/A')}")
+        
         # Create pipeline
         pipeline = StateCorePipeline(config).to(device)
         pipeline.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Verify graph is enabled
+        print(f"Pipeline graph enabled: {pipeline.stage_controller.graph_enabled}")
+        if not pipeline.stage_controller.graph_enabled:
+            print("⚠️  WARNING: Graph not enabled! Enabling now...")
+            pipeline.stage_controller.graph_enabled = True
         
         print("✅ Model loaded successfully\n")
         
