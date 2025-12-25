@@ -273,6 +273,82 @@ def create_dataloaders(
     return train_loader, test_loader
 
 
+def load_simple_wikipedia(
+    tokenizer,
+    max_length: int = 512,
+    batch_size: int = 32,
+    max_samples: Optional[int] = None,
+    split: str = 'train'
+) -> TorchDataLoader:
+    """
+    Load Simple Wikipedia dataset for Phase 2.4.
+    
+    Args:
+        tokenizer: HuggingFace tokenizer (GPT-2)
+        max_length: Maximum sequence length
+        batch_size: Batch size
+        max_samples: Limit number of samples (None = all)
+        split: 'train' or 'validation'
+        
+    Returns:
+        DataLoader with Simple Wikipedia data
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets package required. Run: pip install datasets")
+    
+    print(f"Loading Simple Wikipedia ({split})...")
+    
+    # Load Simple Wikipedia
+    # Note: Using wikipedia 20220301.simple dataset
+    dataset = load_dataset('wikipedia', '20220301.simple', split=split)
+    
+    print(f"  Loaded {len(dataset)} articles")
+    
+    # Filter out short articles
+    dataset = dataset.filter(lambda x: len(x['text'].strip()) > 100)
+    
+    print(f"  After filtering: {len(dataset)} articles")
+    
+    # Tokenize
+    def tokenize_function(examples):
+        return tokenizer(
+            examples['text'],
+            truncation=True,
+            max_length=max_length,
+            padding='max_length',
+            return_tensors='pt'
+        )
+    
+    # Process in batches
+    dataset = dataset.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=['id', 'url', 'title', 'text']
+    )
+    
+    # Set format
+    dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
+    
+    # Limit samples if specified
+    if max_samples is not None:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+        print(f"  Limited to {len(dataset)} samples")
+    
+    print(f"✅ Simple Wikipedia loaded: {len(dataset)} sequences")
+    
+    # Create DataLoader
+    dataloader = TorchDataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=(split == 'train'),
+        num_workers=0
+    )
+    
+    return dataloader
+
+
 if __name__ == '__main__':
     # Test
     train_loader, test_loader = create_dataloaders(batch_size=64)
