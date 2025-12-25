@@ -381,9 +381,13 @@ def main():
     print(f"✅ SOSM initialized: {n_params / 1e6:.2f}M parameters")
     print(f"   - MU: 16 semantic blocks with full attention (64D)")
     print(f"   - TEMPORAL: Self-learning (32D)")
-    print(f"   - Graph: Top-K (K=5) + Streaming + Mutual k-NN [PHASE 1]")
+    k_value = config['components']['graph']['semantic_k']
+    mutual_knn = config['components']['graph']['use_mutual_knn']
+    k1_mode = "Analysis mode" if config['components']['k1']['analysis_only'] else "Active updates"
+    knn_status = "Mutual k-NN" if mutual_knn else "No Mutual k-NN"
+    print(f"   - Graph: Top-K (K={k_value}) + Streaming + {knn_status} [FIXES APPLIED]")
     print(f"   - Model: {config['model']['hidden_dim']}D hidden, {config['model']['n_layers']} layers [PHASE 1: Reduced]")
-    print(f"   - K-1: Analysis mode [PHASE 1: Sampled every 10 steps]")
+    print(f"   - K-1: {k1_mode} [FIXES APPLIED]")
     print()
     
     # Training
