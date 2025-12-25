@@ -28,6 +28,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, List, Tuple
 
+# PHASE 2.4: FlashAttention integration
+from state_core.utils.flash_attention import FlashMultiheadAttention
+
 # Add MU repo to path
 MU_PATH = Path(__file__).parent.parent.parent / "MU"
 if str(MU_PATH) not in sys.path:
@@ -209,10 +212,11 @@ class BlockWiseAttention(nn.Module):
         self.num_blocks = 16
         
         # Each semantic block gets its own attention module
+        # PHASE 2.4: Use FlashAttention for 2-3× speedup
         self.block_attentions = nn.ModuleDict()
         for block_name in SemanticBlockLayout.get_all_block_names():
             # Each 2×2 block = 4 values
-            self.block_attentions[block_name] = nn.MultiheadAttention(
+            self.block_attentions[block_name] = FlashMultiheadAttention(
                 embed_dim=4,
                 num_heads=n_heads,
                 dropout=dropout,
@@ -220,7 +224,8 @@ class BlockWiseAttention(nn.Module):
             )
         
         # Cross-block attention for global refinement
-        self.cross_block_attn = nn.MultiheadAttention(
+        # PHASE 2.4: Use FlashAttention
+        self.cross_block_attn = FlashMultiheadAttention(
             embed_dim=64,
             num_heads=4,
             dropout=dropout,
