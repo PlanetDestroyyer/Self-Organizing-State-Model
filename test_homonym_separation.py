@@ -97,6 +97,16 @@ def get_graph_neighborhood_embedding(pipeline, tokenizer, text, target_word, dev
     with torch.no_grad():
         logits, state = pipeline(tokens, return_state=True)
     
+    # DEBUG: Check what we got
+    print(f"  DEBUG: State has routing_state: {state.routing_state is not None}")
+    if state.routing_state:
+        print(f"  DEBUG: Routing state keys: {state.routing_state.keys()}")
+        if 'graph' in state.routing_state:
+            graph = state.routing_state['graph']
+            print(f"  DEBUG: Graph keys: {graph.keys()}")
+            print(f"  DEBUG: Num edges: {graph.get('num_edges', 0)}")
+            print(f"  DEBUG: Edge types: {graph.get('edge_types', {})}")
+    
     if state.routing_state is None or 'graph' not in state.routing_state:
         print("Warning: No graph in routing state")
         return None, target_idx
@@ -105,7 +115,12 @@ def get_graph_neighborhood_embedding(pipeline, tokenizer, text, target_word, dev
     edges = graph.get('edges', [])
     
     if not edges:
+        # Try adjacency instead
+        edges = graph.get('adjacency', [])
+    
+    if not edges:
         print("Warning: No edges in graph")
+        print(f"  Graph content: {graph}")
         return None, target_idx
     
     # Get MU state (semantic embeddings)
