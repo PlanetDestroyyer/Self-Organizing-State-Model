@@ -24,7 +24,11 @@ components:
     enabled: false
     sequential_edges: true
     semantic_edges: true  # ENABLED: Creates edges based on semantic similarity
-    semantic_threshold: 0.3  # LOWERED: More permissive (was 0.5)
+    semantic_k: 10  # OPTIMAL: From K study (best PPL 1118.07)
+    semantic_threshold: 0.05  # LOWERED: More permissive (was 0.3)
+    semantic_method: topk  # Use top-K instead of threshold
+    streaming_topk: true  # Memory efficient
+    use_mutual_knn: true  # Bidirectional filtering
     random_shortcuts: 0.05  # ENABLED: Small-world shortcuts for long-range connections
 
 model:
