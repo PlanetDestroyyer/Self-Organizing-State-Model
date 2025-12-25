@@ -146,7 +146,7 @@ class FlashMultiheadAttention(nn.Module):
         key_padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
-        FlashAttention implementation.
+        FlashAttention implementation with GPU compatibility fallback.
         
         Args:
             Q: [B, T, H, D]
@@ -166,19 +166,35 @@ class FlashMultiheadAttention(nn.Module):
             # Fall back to standard attention for masked inputs
             return self._standard_attention(Q, K, V, key_padding_mask, None, False, False)[0]
         
-        # Call FlashAttention
-        output = flash_attn_func(
-            Q, K, V,
-            dropout_p=self.dropout if self.training else 0.0,
-            softmax_scale=1.0 / (self.head_dim ** 0.5),
-            causal=False
-        )
-        
-        # Reshape: [B, T, H, D] -> [B, T, E]
-        B, T, H, D = output.shape
-        output = output.reshape(B, T, H * D)
-        
-        return output
+        try:
+            # Call FlashAttention
+            output = flash_attn_func(
+                Q, K, V,
+                dropout_p=self.dropout if self.training else 0.0,
+                softmax_scale=1.0 / (self.head_dim ** 0.5),
+                causal=False
+            )
+            
+            # Reshape: [B, T, H, D] -> [B, T, E]
+            B, T, H, D = output.shape
+            output = output.reshape(B, T, H * D)
+            
+            return output
+            
+        except RuntimeError as e:
+            # Handle GPU compatibility issues (e.g., "only supports Ampere GPUs or newer")
+            if "Ampere" in str(e) or "compute capability" in str(e).lower():
+                # Disable FlashAttention for future calls
+                self.use_flash = False
+                warnings.warn(
+                    f"FlashAttention failed (GPU not supported): {e}\n"
+                    f"Falling back to standard attention for all future calls."
+                )
+                # Fall back to standard attention
+                return self._standard_attention(Q, K, V, key_padding_mask, None, False, False)[0]
+            else:
+                # Re-raise if it's a different error
+                raise
     
     def _standard_attention(
         self,

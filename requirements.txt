@@ -22,7 +22,7 @@ huggingface-hub>=0.16.0
 # Requires CUDA and can be tricky to install
 # Install with: pip install flash-attn --no-build-isolation
 # If installation fails, code will automatically fall back to standard attention
-# flash-attn>=2.3.0
+flash-attn>=1.0.9
 
 # Optional: Experiment Tracking
 # wandb>=0.15.0
