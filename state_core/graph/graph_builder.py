@@ -32,7 +32,9 @@ class GraphBuilder:
         bidirectional: bool = True,
         use_mutual_knn: bool = True,  # PHASE 1: Mutual k-NN filtering
         streaming_topk: bool = True,  # PHASE 1: Streaming Top-K (avoid T×T matrix)
-        semantic_blocks: Optional[List[str]] = None  # PHASE 2: Which MU blocks to use for similarity
+        semantic_blocks: Optional[List[str]] = None,  # PHASE 2: Which MU blocks to use for similarity
+        use_ema: bool = False,  # PHASE 2: Use EMA for stable graph topology
+        ema_decay: float = 0.99  # PHASE 2: EMA decay rate (higher = more stable)
     ):
         """
         Initialize graph builder.
@@ -58,6 +60,38 @@ class GraphBuilder:
         self.use_mutual_knn = use_mutual_knn  # PHASE 1
         self.streaming_topk = streaming_topk  # PHASE 1
         self.semantic_blocks = semantic_blocks if semantic_blocks else ['I', 'R2', 'K']  # PHASE 2: Default to I, R2, K blocks
+        
+        # PHASE 2: EMA for graph stability
+        self.use_ema = use_ema
+        self.ema_decay = ema_decay
+        self.mu_ema = None  # Will be initialized on first forward pass
+    
+    def _update_ema(self, mu_current: torch.Tensor) -> torch.Tensor:
+        """
+        PHASE 2: Update and return EMA of MU embeddings.
+        
+        This prevents graph "flickering" during training by using smoothed embeddings.
+        The graph topology evolves slowly, giving attention layers a stable target.
+        
+        Args:
+            mu_current: [B, T, D] current MU embeddings
+        
+        Returns:
+            mu_stable: [B, T, D] EMA-smoothed embeddings for graph construction
+        """
+        if not self.use_ema:
+            return mu_current
+        
+        # Initialize EMA state on first call
+        if self.mu_ema is None:
+            self.mu_ema = mu_current.detach().clone()
+            return mu_current
+        
+        # Update EMA: ema = decay * ema_prev + (1 - decay) * current
+        with torch.no_grad():
+            self.mu_ema = self.ema_decay * self.mu_ema + (1 - self.ema_decay) * mu_current.detach()
+        
+        return self.mu_ema
     
     def _select_semantic_blocks(self, mu_state: torch.Tensor) -> torch.Tensor:
         """
@@ -136,12 +170,16 @@ class GraphBuilder:
         for i in range(seq_len):
             adjacency.append((i, i))
         
-        # Semantic similarity edges
+        # Semantic edges based on similarity
         if self.enable_semantic and semantic_state is not None:
+            # PHASE 2: Apply EMA smoothing for stable graph topology
+            semantic_state_stable = self._update_ema(semantic_state)
+            
             if self.semantic_method == 'topk':
-                semantic_edges = self._build_semantic_edges_topk(semantic_state, seq_len)
-            else:  # threshold method
-                semantic_edges = self._build_semantic_edges_threshold(semantic_state, seq_len)
+                semantic_edges = self._build_semantic_edges_topk(semantic_state_stable, seq_len)
+            else:
+                semantic_edges = self._build_semantic_edges_threshold(semantic_state_stable, seq_len)
+            
             adjacency.extend(semantic_edges)
             edge_types['semantic'] = len(semantic_edges)
         
@@ -357,7 +395,9 @@ class GraphBuilder:
         shortcut_prob: Optional[float] = None,
         use_mutual_knn: Optional[bool] = None,  # PHASE 1
         streaming_topk: Optional[bool] = None,  # PHASE 1
-        semantic_blocks: Optional[List[str]] = None  # PHASE 2
+        semantic_blocks: Optional[List[str]] = None,  # PHASE 2
+        use_ema: Optional[bool] = None,  # PHASE 2
+        ema_decay: Optional[float] = None  # PHASE 2
     ):
         """Update graph builder configuration."""
         if enable_semantic is not None:
@@ -378,3 +418,7 @@ class GraphBuilder:
             self.streaming_topk = streaming_topk
         if semantic_blocks is not None:  # PHASE 2
             self.semantic_blocks = semantic_blocks
+        if use_ema is not None:  # PHASE 2
+            self.use_ema = use_ema
+        if ema_decay is not None:  # PHASE 2
+            self.ema_decay = ema_decay
