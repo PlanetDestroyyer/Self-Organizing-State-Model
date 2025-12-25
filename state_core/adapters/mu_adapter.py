@@ -219,18 +219,21 @@ class BlockWiseAttention(nn.Module):
         # Combine all blocks [B, T, 64]
         all_blocks = torch.cat(list(block_outputs.values()), dim=-1)
         
-        # Cross-block attention
+        # Pre-LayerNorm: Normalize BEFORE attention
+        # This improves gradient flow and training stability
+        all_blocks_normed = self.norm1(all_blocks)
         cross_out, _ = self.cross_block_attn(
-            all_blocks, all_blocks, all_blocks,
+            all_blocks_normed, all_blocks_normed, all_blocks_normed,
             key_padding_mask=mask
         )
         
-        # Residual + norm
-        all_blocks = self.norm1(all_blocks + cross_out)
+        # Residual connection
+        all_blocks = all_blocks + cross_out
         
-        # FFN
-        ffn_out = self.ffn(all_blocks)
-        all_blocks = self.norm2(all_blocks + ffn_out)
+        # Pre-LayerNorm for FFN
+        all_blocks_normed = self.norm2(all_blocks)
+        ffn_out = self.ffn(all_blocks_normed)
+        all_blocks = all_blocks + ffn_out
         
         # Compute dynamic sensitivity
         sensitivity = self.sensitivity(token_ids)  # [B, T, 16]
