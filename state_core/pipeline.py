@@ -239,10 +239,15 @@ class StateCorePipeline(nn.Module):
         # This allows "capital" ↔ "India" and "is" ↔ "capital" semantic routing
         self.graph_builder = GraphBuilder(
             enable_sequential=graph_cfg.get('sequential_edges', True),
-            enable_semantic=graph_cfg.get('semantic_edges', True),  # ENABLED: Semantic routing active
-            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.05) > 0,  # ENABLED: Small-world shortcuts
-            semantic_threshold=graph_cfg.get('semantic_threshold', 0.3),  # Lower threshold for more edges
-            shortcut_prob=graph_cfg.get('random_shortcuts', 0.05)  # 5% probability for shortcuts
+            enable_semantic=graph_cfg.get('semantic_edges', True),
+            enable_shortcuts=graph_cfg.get('random_shortcuts', 0.0) > 0,
+            semantic_threshold=graph_cfg.get('semantic_threshold', 0.05),  # FIX: Was 0.3, now 0.05
+            semantic_k=graph_cfg.get('semantic_k', 5),  # FIX: Added missing parameter
+            semantic_method=graph_cfg.get('semantic_method', 'topk'),  # FIX: Added missing parameter
+            shortcut_prob=graph_cfg.get('random_shortcuts', 0.0),  # FIX: Use as probability directly
+            use_mutual_knn=graph_cfg.get('use_mutual_knn', True),  # FIX: Added missing parameter
+            streaming_topk=graph_cfg.get('streaming_topk', True),  # FIX: Added missing parameter
+            semantic_blocks=graph_cfg.get('semantic_blocks', None)  # FIX: Added Phase 2 parameter
         )
         self.graph_mask_converter = GraphMaskConverter()
         

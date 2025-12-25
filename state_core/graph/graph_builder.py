@@ -351,12 +351,26 @@ class GraphBuilder:
         return edges
     
     def _build_shortcuts(self, seq_len: int) -> List[Tuple[int, int]]:
-        """Build random small-world shortcuts."""
+        """
+        Build random small-world shortcuts.
+        
+        For each token, add shortcuts with probability shortcut_prob.
+        Expected: T * shortcut_prob shortcuts (unidirectional)
+        """
         edges = []
         
+        # OLD BUG: Was checking ALL pairs O(T²) → massive over-generation
+        # NEW: Each token gets ~shortcut_prob random long-range connections
         for i in range(seq_len):
-            for j in range(i + 2, seq_len):  # Skip adjacent
-                if random.random() < self.shortcut_prob:
+            # Decide if this token gets a shortcut
+            if random.random() < self.shortcut_prob:
+                # Pick random non-adjacent target
+                candidates = list(range(seq_len))
+                # Remove self and adjacents
+                candidates = [j for j in candidates if abs(j - i) > 1]
+                
+                if candidates:
+                    j = random.choice(candidates)
                     edges.append((i, j))
                     if self.bidirectional:
                         edges.append((j, i))

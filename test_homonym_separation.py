@@ -19,40 +19,41 @@ import numpy as np
 
 
 # Test pairs: (context1, context2, target_word)
+# Using longer contexts to ensure graph generation
 HOMONYM_TEST_PAIRS = [
     # Bank (THE KEY TEST)
     {
         'word': 'bank',
-        'context1': "I went to the bank to deposit money",
-        'context2': "I sat on the bank and watched the river",
+        'context1': "I went to the bank to deposit money in my savings account for retirement planning",
+        'context2': "I sat on the bank of the river and watched the water flow peacefully downstream",
         'expected': 'financial vs geographic'
     },
     # Bat
     {
         'word': 'bat',
-        'context1': "The bat flew into the dark cave",
-        'context2': "He swung the baseball bat with force",
+        'context1': "The bat flew into the dark cave at night to find insects for food",
+        'context2': "He swung the baseball bat with great force to hit the ball out of the park",
         'expected': 'animal vs sports equipment'
     },
     # Java
     {
         'word': 'java',
-        'context1': "Java is a beautiful island in Indonesia",
-        'context2': "Java is a popular programming language",
+        'context1': "Java is a beautiful island in Indonesia with rich cultural heritage and stunning landscapes",
+        'context2': "Java is a popular programming language used for building enterprise applications and Android apps",
         'expected': 'place vs technology'
     },
     # Lead
     {
         'word': 'lead',
-        'context1': "Lead is a heavy toxic metal",
-        'context2': "She will lead the team to victory",
+        'context1': "Lead is a heavy toxic metal that was once commonly used in paint and gasoline",
+        'context2': "She will lead the team to victory with her excellent leadership skills and strategic thinking",
         'expected': 'metal vs verb'
     },
     # Python
     {
         'word': 'python',
-        'context1': "The python is a large constrictor snake",
-        'context2': "Python is widely used for machine learning",
+        'context1': "The python is a large constrictor snake that can grow to be over twenty feet long",
+        'context2': "Python is widely used for machine learning and data science because of its simplicity and powerful libraries",
         'expected': 'animal vs programming'
     },
 ]
