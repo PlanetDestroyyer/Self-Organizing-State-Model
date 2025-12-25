@@ -371,7 +371,7 @@ def main():
             'hidden_dim': 896,  # PHASE 1: Increased to compensate for fewer layers
             'n_layers': 4,  # PHASE 1: Reduced from 6 (graph does heavy lifting)
             'n_heads': 8,
-            'dropout': 0.1,
+            'dropout': 0.3,  # FIX: Increased from 0.1 to prevent overfitting
             'combination_mode': 'concat',
         }
     }
@@ -401,8 +401,8 @@ def main():
         print(f"✅ Loaded WikiText dataset")
         print()
         
-        # Optimizer
-        optimizer = torch.optim.AdamW(pipeline.parameters(), lr=3e-4, weight_decay=0.01)
+        # Optimizer with weight decay to prevent overfitting
+        optimizer = torch.optim.AdamW(pipeline.parameters(), lr=1e-4, weight_decay=0.01)  # FIX: Added weight_decay, weight_decay=0.01)
         
         # PHASE 1: Mixed precision scaler
         from torch.cuda.amp import GradScaler
@@ -416,6 +416,12 @@ def main():
         print("TRAINING")
         print("-" * 70)
         
+        # Early stopping variables
+        best_test_loss = float('inf')
+        patience_counter = 0
+        patience = 3  # Stop if no improvement for 3 epochs
+        best_checkpoint = None
+        
         for epoch in range(EPOCHS):
             print(f"\nEpoch {epoch + 1}/{EPOCHS}")
             
@@ -425,15 +431,43 @@ def main():
             print(f"  Train Loss: {train_loss:.4f}")
             print(f"  Test Loss:  {test_loss:.4f}")
             print(f"  Perplexity: {perplexity:.2f}")
+            
+            # Early stopping check
+            if test_loss < best_test_loss:
+                best_test_loss = test_loss
+                patience_counter = 0
+                # Save best checkpoint
+                best_checkpoint = {
+                    'model_state_dict': pipeline.state_dict(),
+                    'config': config,
+                    'epoch': epoch + 1,
+                    'test_loss': test_loss,
+                    'perplexity': perplexity,
+                }
+                print(f"  ✅ New best! Saved (PPL: {perplexity:.2f})")
+            else:
+                patience_counter += 1
+                print(f"  ⚠️  No improvement ({patience_counter}/{patience})")
+                
+                if patience_counter >= patience:
+                    print(f"\n🛑 Early stopping triggered! No improvement for {patience} epochs.")
+                    print(f"Best epoch: {best_checkpoint['epoch']}, PPL: {best_checkpoint['perplexity']:.2f}")
+                    break
         
-        # Save checkpoint
+        # Save best checkpoint (or final if no early stopping)
         checkpoint_name = 'sosm_trained.pt'
-        torch.save({
-            'model_state_dict': pipeline.state_dict(),
-            'config': config,
-            'epoch': EPOCHS,
-        }, checkpoint_name)
-        print(f"\n✅ Saved checkpoint: {checkpoint_name}")
+        if best_checkpoint:
+            torch.save(best_checkpoint, checkpoint_name)
+            print(f"\n✅ Saved BEST checkpoint: {checkpoint_name}")
+            print(f"   Epoch: {best_checkpoint['epoch']}, PPL: {best_checkpoint['perplexity']:.2f}")
+        else:
+            # No early stopping triggered, save final
+            torch.save({
+                'model_state_dict': pipeline.state_dict(),
+                'config': config,
+                'epoch': EPOCHS,
+            }, checkpoint_name)
+            print(f"\n✅ Saved final checkpoint: {checkpoint_name}")
     else:
         print("⚠️  Skipping training, loading from checkpoint...")
         checkpoint = torch.load('sosm_trained.pt')
