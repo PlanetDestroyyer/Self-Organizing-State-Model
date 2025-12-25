@@ -17,25 +17,18 @@ from typing import Optional, Tuple
 import warnings
 
 
-# Try to import FlashAttention (supports both v1.x and v2.x)
+# Try to import FlashAttention (auto-detect and fallback if not available)
 FLASH_ATTN_AVAILABLE = False
 flash_attn_func = None
 
 try:
-    # Try v2.x import path first
     from flash_attn import flash_attn_func
     FLASH_ATTN_AVAILABLE = True
-    print("✓ FlashAttention v2.x available - will use optimized attention")
+    print("✓ FlashAttention available - will use optimized attention")
 except ImportError:
-    try:
-        # Try v1.x import path (different location)
-        from flash_attn.flash_attn_interface import flash_attn_func
-        FLASH_ATTN_AVAILABLE = True
-        print("✓ FlashAttention v1.x available - will use optimized attention")
-    except ImportError:
-        FLASH_ATTN_AVAILABLE = False
-        print("✗ FlashAttention not available - using standard attention")
-        print("  Install with: pip install flash-attn --no-build-isolation")
+    FLASH_ATTN_AVAILABLE = False
+    print("✗ FlashAttention not available - using standard attention")
+    print("   (Standard attention works perfectly, just slightly slower)")
 
 
 class FlashMultiheadAttention(nn.Module):
