@@ -223,17 +223,22 @@ def train_with_k(k_value, epochs=5, device='cuda', max_steps=1000):
                       f"Loss={loss.item():.4f}, PPL={ppl:.2f}, "
                       f"Speed={step_time:.3f}s")
         
-        # Epoch summary
-        avg_loss = epoch_loss / epoch_steps
-        ppl = torch.exp(torch.tensor(avg_loss)).item()
-        results['ppls'].append(ppl)
+        # Epoch summary (only if we actually trained)
+        if epoch_steps > 0:
+            avg_loss = epoch_loss / epoch_steps
+            ppl = torch.exp(torch.tensor(avg_loss)).item()
+            results['ppls'].append(ppl)
+            
+            if epoch_edges:
+                avg_edges = sum(epoch_edges) / len(epoch_edges)
+                results['edge_counts'].append(avg_edges)
+                print(f"  Epoch {epoch+1} complete: PPL={ppl:.2f}, Avg Edges={avg_edges:.0f}")
+            else:
+                print(f"  Epoch {epoch+1} complete: PPL={ppl:.2f}")
         
-        if epoch_edges:
-            avg_edges = sum(epoch_edges) / len(epoch_edges)
-            results['edge_counts'].append(avg_edges)
-            print(f"  Epoch {epoch+1} complete: PPL={ppl:.2f}, Avg Edges={avg_edges:.0f}")
-        else:
-            print(f"  Epoch {epoch+1} complete: PPL={ppl:.2f}")
+        # Break if max_steps reached
+        if total_steps >= max_steps:
+            break
     
     total_time = time.time() - start_time
     
