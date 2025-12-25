@@ -425,13 +425,28 @@ def main():
     
     # Training
     if not args.skip_training:
-        print("Loading training data...")
-        train_loader, test_loader = create_dataloaders(
+        print("Loading training data (Simple Wikipedia)...")
+        from sosm_data import load_simple_wikipedia
+        
+        # Load train and validation sets using slicing
+        # Simple Wikipedia only has 'train', so we split it manually
+        train_loader = load_simple_wikipedia(
+            tokenizer, 
+            max_length=SEQ_LEN,
             batch_size=BATCH_SIZE,
-            seq_length=SEQ_LEN,
-            domains=['wikitext']
+            split='train[:95%]',  # First 95% for training
+            max_samples=20000 
         )
-        print(f"✅ Loaded WikiText dataset")
+        
+        test_loader = load_simple_wikipedia(
+            tokenizer,
+            max_length=SEQ_LEN,
+            batch_size=BATCH_SIZE,
+            split='train[95%:]', # Last 5% for validation
+            max_samples=1000      # Cap validation too
+        )
+        
+        print(f"✅ Loaded Simple Wikipedia dataset (Split: 95/5)")
         print()
         
         # Optimizer with weight decay to prevent overfitting

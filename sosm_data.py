@@ -339,10 +339,13 @@ def load_simple_wikipedia(
     print(f"✅ Simple Wikipedia loaded: {len(dataset)} sequences")
     
     # Create DataLoader
+    # Enable shuffle for any train split (including slices like 'train[:90%]')
+    do_shuffle = split.startswith('train')
+    
     dataloader = TorchDataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=(split == 'train'),
+        shuffle=do_shuffle,
         num_workers=0
     )
     
