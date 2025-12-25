@@ -81,6 +81,68 @@ class SemanticBlockLayout:
 
 
 # ============================================================================
+# FACTORIZED EMBEDDINGS (ALBERT-style parameter reduction)
+# ============================================================================
+
+class FactorizedEmbedding(nn.Module):
+    """
+    Factorized word embeddings for parameter efficiency.
+    
+    Instead of vocab_size × hidden_dim (e.g., 50257 × 768 = 38.6M params),
+    use vocab_size × factorized_dim + factorized_dim × hidden_dim.
+    
+    For factorized_dim=128: 50257×128 + 128×768 = 6.4M + 0.1M = 6.5M params
+    Reduction: 38.6M → 6.5M (6× fewer parameters!)
+    
+    Based on ALBERT (Lan et al., 2019).
+    """
+    
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_dim: int,
+        factorized_dim: int = 128
+    ):
+        super().__init__()
+        
+        self.vocab_size = vocab_size
+        self.hidden_dim = hidden_dim
+        self.factorized_dim = factorized_dim
+        
+        # Low-rank embedding: vocab → factorized_dim
+        self.word_embeddings = nn.Embedding(vocab_size, factorized_dim)
+        nn.init.normal_(self.word_embeddings.weight, mean=0.0, std=0.02)
+        
+        # Projection: factorized_dim → hidden_dim
+        self.projection = nn.Linear(factorized_dim, hidden_dim, bias=False)
+        nn.init.normal_(self.projection.weight, mean=0.0, std=0.02)
+        
+        # Calculate parameter savings
+        standard_params = vocab_size * hidden_dim
+        factorized_params = vocab_size * factorized_dim + factorized_dim * hidden_dim
+        reduction = standard_params / factorized_params
+        
+        print(f"  Factorized Embeddings: {factorized_params:,} params "
+              f"(vs {standard_params:,} standard) - {reduction:.1f}× reduction")
+    
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            token_ids: [B, T] token indices
+            
+        Returns:
+            embeddings: [B, T, hidden_dim]
+        """
+        # Embed to low dimension
+        factorized = self.word_embeddings(token_ids)  # [B, T, factorized_dim]
+        
+        # Project to full dimension
+        projected = self.projection(factorized)  # [B, T, hidden_dim]
+        
+        return projected
+
+
+# ============================================================================
 # DYNAMIC SENSITIVITY (Learned gating per block)
 # ============================================================================
 
@@ -276,7 +338,9 @@ class MUAdapter(nn.Module):
         flatten_output: bool = True,
         use_full_model: bool = True,  # Now True by default!
         n_layers: int = 2,  # Number of block attention layers
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        use_factorized_embeddings: bool = True,  # NEW
+        factorized_dim: int = 32  # NEW: Optimal for embed_dim=64 (2× reduction)
     ):
         super().__init__()
         
@@ -286,8 +350,16 @@ class MUAdapter(nn.Module):
         self.use_full_model = use_full_model
         
         # Token embedding → 64-dim (8×8 flattened)
-        self.token_to_mu = nn.Embedding(vocab_size, embed_dim)
-        nn.init.normal_(self.token_to_mu.weight, mean=0.0, std=0.02)
+        # Use factorized embeddings if enabled (6× parameter reduction)
+        if use_factorized_embeddings:
+            self.token_to_mu = FactorizedEmbedding(
+                vocab_size=vocab_size,
+                hidden_dim=embed_dim,
+                factorized_dim=factorized_dim
+            )
+        else:
+            self.token_to_mu = nn.Embedding(vocab_size, embed_dim)
+            nn.init.normal_(self.token_to_mu.weight, mean=0.0, std=0.02)
         
         if use_full_model:
             # Full block-wise attention layers
