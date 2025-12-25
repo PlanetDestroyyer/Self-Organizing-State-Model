@@ -353,7 +353,7 @@ def main():
                 'learning_mode': 'gradient',
             },
             'k1': {
-                'analysis_only': True,
+                'analysis_only': False,  # FIX: Enable K-1 weight updates
             },
             'graph': {
                 'enabled': True,  # ENABLED
