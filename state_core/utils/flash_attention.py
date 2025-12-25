@@ -178,12 +178,29 @@ class FlashMultiheadAttention(nn.Module):
         
         try:
             # Call FlashAttention
-            output = flash_attn_func(
-                Q, K, V,
-                dropout_p=self.dropout if self.training else 0.0,
-                softmax_scale=1.0 / (self.head_dim ** 0.5),
-                causal=False
-            )
+            # v1.x and v2.x have different signatures
+            # v2.x: flash_attn_func(q, k, v, dropout_p, softmax_scale, causal, ...)
+            # v1.x: flash_attn_func(q, k, v, causal, softmax_scale) - no dropout_p!
+            
+            try:
+                # Try v2.x signature first (has dropout_p parameter)
+                output = flash_attn_func(
+                    Q, K, V,
+                    dropout_p=self.dropout if self.training else 0.0,
+                    softmax_scale=1.0 / (self.head_dim ** 0.5),
+                    causal=False
+                )
+            except TypeError as te:
+                # v1.x doesn't accept dropout_p, try v1.x signature
+                if "dropout_p" in str(te):
+                    # v1.x API: positional args only, no dropout
+                    output = flash_attn_func(
+                        Q, K, V,
+                        False,  # causal
+                        1.0 / (self.head_dim ** 0.5)  # softmax_scale
+                    )
+                else:
+                    raise
             
             # Reshape: [B, T, H, D] -> [B, T, E]
             B, T, H, D = output.shape
