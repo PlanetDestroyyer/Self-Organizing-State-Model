@@ -226,6 +226,22 @@ class StateCorePipeline(nn.Module):
             dropout=model_cfg.get('dropout', 0.1)
         )
         
+        # PHASE 2.3: Contextual MU Refinement (optional)
+        # Adds local context awareness to position-invariant MU
+        # CRITICAL DECISION POINT: Test if context helps (homonym separation >0.05)
+        self.use_contextual_refinement = mu_cfg.get('use_contextual_refinement', False)
+        if self.use_contextual_refinement:
+            from .adapters.contextual_refiner import ContextualMURefinementEfficient
+            self.contextual_refiner = ContextualMURefinementEfficient(
+                mu_dim=self.embed_dim,
+                kernel_size=mu_cfg.get('context_window', 3),
+                num_layers=mu_cfg.get('context_layers', 1),
+                dropout=model_cfg.get('dropout', 0.1)
+            )
+            print("  ✓ Contextual MU refinement enabled (3-token window)")
+        else:
+            self.contextual_refiner = None
+        
         # TEMPORAL Adapter (Stage 1+)
         self.temporal_adapter = TemporalAdapter(
             vocab_size=self.vocab_size,
@@ -324,6 +340,10 @@ class StateCorePipeline(nn.Module):
         
         # === Step 1: MU Semantic State (position-invariant) ===
         state.semantic_state = self.mu_adapter(token_ids)  # [B, T, 64]
+        
+        # PHASE 2.3: Apply contextual refinement if enabled
+        if self.use_contextual_refinement and self.contextual_refiner is not None:
+            state.semantic_state = self.contextual_refiner(state.semantic_state)
         
         # === Step 2: TEMPORAL Time State (if enabled) ===
         if self.stage_controller.temporal_enabled:
