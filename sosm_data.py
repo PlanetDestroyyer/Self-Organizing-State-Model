@@ -301,9 +301,14 @@ def load_simple_wikipedia(
     print(f"Loading Simple Wikipedia ({split})...")
     
     # Load Simple Wikipedia
-    # Note: Using wikipedia 20220301.simple dataset
-    # Kaggle/New Datasets requires trust_remote_code=True for script-based datasets
-    dataset = load_dataset('wikipedia', '20220301.simple', split=split, trust_remote_code=True)
+    # Note: Using wikimedia/wikipedia (Parquet-based) to avoid script loading errors
+    # Config: 20231101.simple (November 2023 dump)
+    try:
+        dataset = load_dataset('wikimedia/wikipedia', '20231101.simple', split=split)
+    except Exception:
+        # Fallback to the generic config if specific date fails
+        print("  Warning: Specific date config failed, trying generic '20231101.simple'")
+        dataset = load_dataset('wikimedia/wikipedia', '20231101.simple', split=split)
     
     print(f"  Loaded {len(dataset)} articles")
     
