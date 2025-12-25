@@ -28,6 +28,9 @@ import torch.nn.functional as F
 from pathlib import Path
 from transformers import GPT2Tokenizer
 
+# PHASE 2.4: Import nucleus sampling
+from state_core.utils.sampling import nucleus_sampling
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -175,7 +178,9 @@ def test_disambiguation(pipeline, tokenizer, prompt1, prompt2, test_name):
         logits1, state1 = pipeline(tokens1, return_state=True)
     
     graph1 = state1.routing_state['graph'] if state1.routing_state else None
-    next_token1 = logits1[0, -1].argmax()
+    
+    # PHASE 2.4: Use nucleus sampling instead of greedy
+    next_token1 = nucleus_sampling(logits1[0, -1], p=0.9, temperature=0.8)
     next_word1 = tokenizer.decode([next_token1])
     
     # Get top 5 predictions
@@ -198,7 +203,9 @@ def test_disambiguation(pipeline, tokenizer, prompt1, prompt2, test_name):
         logits2, state2 = pipeline(tokens2, return_state=True)
     
     graph2 = state2.routing_state['graph'] if state2.routing_state else None
-    next_token2 = logits2[0, -1].argmax()
+    
+    # PHASE 2.4: Use nucleus sampling instead of greedy
+    next_token2 = nucleus_sampling(logits2[0, -1], p=0.9, temperature=0.8)
     next_word2 = tokenizer.decode([next_token2])
     
     # Get top 5 predictions
