@@ -302,7 +302,8 @@ def load_simple_wikipedia(
     
     # Load Simple Wikipedia
     # Note: Using wikipedia 20220301.simple dataset
-    dataset = load_dataset('wikipedia', '20220301.simple', split=split)
+    # Kaggle/New Datasets requires trust_remote_code=True for script-based datasets
+    dataset = load_dataset('wikipedia', '20220301.simple', split=split, trust_remote_code=True)
     
     print(f"  Loaded {len(dataset)} articles")
     
