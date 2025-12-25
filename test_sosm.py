@@ -360,10 +360,10 @@ def main():
                 'sequential_edges': True,
                 'semantic_edges': True,  # ENABLED
                 'semantic_method': 'topk',  # Top-K method (not threshold)
-                'semantic_k': 5,  # Each token connects to 5 most similar
+                'semantic_k': 7,  # FIX: Increased from 5 for more connections
                 'semantic_threshold': 0.05,  # Optional minimum threshold
                 'random_shortcuts': 0.20,  # Small-world optimal (20%)
-                'use_mutual_knn': True,  # PHASE 1: Mutual k-NN filtering
+                'use_mutual_knn': False,  # FIX: Disabled to keep asymmetric edges
                 'streaming_topk': True,  # PHASE 1: Streaming Top-K (O(T×K) memory)
             }
         },
