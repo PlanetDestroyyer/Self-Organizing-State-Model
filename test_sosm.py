@@ -428,14 +428,12 @@ def main():
         print("Loading training data (Simple Wikipedia)...")
         from sosm_data import load_simple_wikipedia
         
-        # Load train and validation sets using slicing
-        # Simple Wikipedia only has 'train', so we split it manually
         train_loader = load_simple_wikipedia(
             tokenizer, 
             max_length=SEQ_LEN,
             batch_size=BATCH_SIZE,
             split='train[:95%]',  # First 95% for training
-            max_samples=20000 
+            max_samples=None      # Use FULL dataset
         )
         
         test_loader = load_simple_wikipedia(
@@ -443,7 +441,7 @@ def main():
             max_length=SEQ_LEN,
             batch_size=BATCH_SIZE,
             split='train[95%:]', # Last 5% for validation
-            max_samples=1000      # Cap validation too
+            max_samples=None      # Use FULL validation set
         )
         
         print(f"✅ Loaded Simple Wikipedia dataset (Split: 95/5)")
