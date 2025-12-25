@@ -124,7 +124,7 @@ def get_graph_neighborhood_embedding(pipeline, tokenizer, text, target_word, dev
         return None, target_idx
     
     # Get MU state (semantic embeddings)
-    mu_state = state.mu_state  # [B, T, 64]
+    mu_state = state.semantic_state  # [B, T, 64]
     mu_state = mu_state[0]  # [T, 64]
     
     # Find neighbors of target word
