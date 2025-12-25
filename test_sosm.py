@@ -50,8 +50,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Comprehensive SOSM Test')
     parser.add_argument('--epochs', type=int, default=3,
                         help='Number of training epochs (default: 3)')
-    parser.add_argument('--batch-size', type=int, default=32,
-                        help='Batch size (default: 32)')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Batch size (default: 64)')
     parser.add_argument('--skip-training', action='store_true',
                         help='Skip training, load from checkpoint')
     return parser.parse_args()
@@ -367,7 +367,7 @@ def main():
                 'sequential_edges': True,
                 'semantic_edges': True,  # ENABLED
                 'semantic_method': 'topk',  # Top-K method (not threshold)
-                'semantic_k': 7,  # FIX: Increased from 5 for more connections
+                'semantic_k': 10,  # PHASE 2.3: Optimized via K study (PPL 1118.07)
                 'semantic_threshold': 0.05,  # Optional minimum threshold
                 'random_shortcuts': 0.20,  # Small-world optimal (20%)
                 'use_mutual_knn': False,  # FIX: Disabled to keep asymmetric edges
