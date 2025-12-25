@@ -31,7 +31,8 @@ class GraphBuilder:
         shortcut_prob: float = 0.05,
         bidirectional: bool = True,
         use_mutual_knn: bool = True,  # PHASE 1: Mutual k-NN filtering
-        streaming_topk: bool = True  # PHASE 1: Streaming Top-K (avoid T×T matrix)
+        streaming_topk: bool = True,  # PHASE 1: Streaming Top-K (avoid T×T matrix)
+        semantic_blocks: Optional[List[str]] = None  # PHASE 2: Which MU blocks to use for similarity
     ):
         """
         Initialize graph builder.
@@ -56,6 +57,48 @@ class GraphBuilder:
         self.bidirectional = bidirectional
         self.use_mutual_knn = use_mutual_knn  # PHASE 1
         self.streaming_topk = streaming_topk  # PHASE 1
+        self.semantic_blocks = semantic_blocks if semantic_blocks else ['I', 'R2', 'K']  # PHASE 2: Default to I, R2, K blocks
+    
+    def _select_semantic_blocks(self, mu_state: torch.Tensor) -> torch.Tensor:
+        """
+        PHASE 2: Extract specific MU blocks for similarity computation.
+        
+        MU structure: 8×8 matrix = 16 blocks of 4D each = 64D total
+        Blocks: I, D, R1, R2, K, M, T, P, S, C, N, X, E, F, A, Z
+        
+        Common selections:
+        - ['I', 'R2', 'K']: Identity + Relations + Keys (12D) - semantic core
+        - ['I', 'D']: Identity + Domain (8D) - very fast
+        - All blocks: Use full 64D (original behavior)
+        
+        Args:
+            mu_state: [B, T, 64] MU semantic state
+        
+        Returns:
+            [B, T, block_dim] Selected blocks concatenated
+        """
+        if len(self.semantic_blocks) == 16:  # All blocks
+            return mu_state
+        
+        # Map block names to indices (each block is 4D)
+        block_map = {
+            'I': 0, 'D': 1, 'R1': 2, 'R2': 3,
+            'K': 4, 'M': 5, 'T': 6, 'P': 7,
+            'S': 8, 'C': 9, 'N': 10, 'X': 11,
+            'E': 12, 'F': 13, 'A': 14, 'Z': 15
+        }
+        
+        # Select block slices
+        selected_slices = []
+        for block_name in self.semantic_blocks:
+            if block_name in block_map:
+                block_idx = block_map[block_name]
+                start = block_idx * 4
+                end = start + 4
+                selected_slices.append(mu_state[..., start:end])
+        
+        # Concatenate selected blocks
+        return torch.cat(selected_slices, dim=-1)
     
     def build_graph(
         self,
@@ -144,11 +187,15 @@ class GraphBuilder:
         """
         edges = []
         
-        # Use first batch item
+               # Use first batch item
         state = semantic_state[0] if semantic_state.dim() == 3 else semantic_state
         
+        # PHASE 2: Select semantic blocks (default: I, R2, K = 12D)
+        state = self._select_semantic_blocks(state.unsqueeze(0) if state.dim() == 2 else state)
+        state = state[0] if state.dim() == 3 else state  # Back to [T, d]
+        
         # Normalize once
-        state_norm = F.normalize(state, dim=-1)  # [T, d]
+        state_norm = F.normalize(state, dim=-1)  # [T, reduced_d]
         
         # For each token, compute similarities with all others (one row only!)
         for i in range(seq_len):
@@ -309,7 +356,8 @@ class GraphBuilder:
         semantic_method: Optional[str] = None,
         shortcut_prob: Optional[float] = None,
         use_mutual_knn: Optional[bool] = None,  # PHASE 1
-        streaming_topk: Optional[bool] = None  # PHASE 1
+        streaming_topk: Optional[bool] = None,  # PHASE 1
+        semantic_blocks: Optional[List[str]] = None  # PHASE 2
     ):
         """Update graph builder configuration."""
         if enable_semantic is not None:
@@ -328,3 +376,5 @@ class GraphBuilder:
             self.use_mutual_knn = use_mutual_knn
         if streaming_topk is not None:  # PHASE 1
             self.streaming_topk = streaming_topk
+        if semantic_blocks is not None:  # PHASE 2
+            self.semantic_blocks = semantic_blocks

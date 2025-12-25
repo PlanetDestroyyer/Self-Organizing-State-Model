@@ -365,6 +365,7 @@ def main():
                 'random_shortcuts': 0.20,  # Small-world optimal (20%)
                 'use_mutual_knn': False,  # FIX: Disabled to keep asymmetric edges
                 'streaming_topk': True,  # PHASE 1: Streaming Top-K (O(T×K) memory)
+                'semantic_blocks': ['I', 'R2', 'K'],  # PHASE 2: Use I, R2, K blocks for similarity (12D)
             }
         },
         'model': {
