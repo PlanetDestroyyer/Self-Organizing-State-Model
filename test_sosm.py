@@ -352,8 +352,12 @@ def main():
                 'vocab_size': VOCAB_SIZE,
                 'embed_dim': 64,
                 'max_seq_len': SEQ_LEN,
-                'use_full_model': True,  # ENABLED: 16-block semantic attention
+                'use_full_model': True,  # PHASE 2: Full 16-block attention
                 'n_layers': 2,  # Number of block attention layers
+                'use_factorized_embeddings': True,  # PHASE 2.2: 2× reduction
+                'factorized_dim': 32,
+                'use_contextual_refinement': True,  # PHASE 2.3: 3-TOKEN WINDOW
+                'window_size': 3,  # PHASE 2.3: Local context
             },
             'temporal': {
                 'time_dim': 32,
@@ -381,6 +385,7 @@ def main():
             'n_heads': 8,
             'dropout': 0.3,  # FIX: Increased from 0.1 to prevent overfitting
             'combination_mode': 'concat',
+            'use_typed_edges': True,  # PHASE 2.3: TYPED EDGE EMBEDDINGS
         }
     }
     
