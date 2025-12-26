@@ -12,7 +12,15 @@ from pathlib import Path
 import torch
 import numpy as np
 from collections import defaultdict
-import matplotlib.pyplot as plt
+
+# Optional matplotlib for plotting
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+    print("Note: matplotlib not available, skipping plots")
+
 
 # Add project root
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -165,30 +173,89 @@ def main():
     print(f"Device: {args.device}")
     print("="*60)
     
-    # Load model
-    print("\nLoading model...")
+    # Load checkpoint first to get config
+    print("\nLoading checkpoint...")
     
-    # Create config (minimal, will be overridden by checkpoint)
-    config = {
-        'stage': 3,
-        'components': {
-            'mu': {'vocab_size': 50257, 'embed_dim': 64},
-            'temporal': {},
-            'graph': {'semantic_k': 10}
-        },
-        'model': {'hidden_dim': 896, 'n_layers': 4, 'n_heads': 8}
-    }
+    if not Path(args.checkpoint).exists():
+        print(f"❌ Checkpoint not found: {args.checkpoint}")
+        sys.exit(1)
     
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    
+    # Extract config from checkpoint if available
+    if 'config' in checkpoint:
+        config = checkpoint['config']
+        print("✓ Using config from checkpoint")
+    else:
+        # Reconstruct config from checkpoint structure
+        print("⚠️  No config in checkpoint, reconstructing from state_dict...")
+        
+        # Inspect checkpoint to get dimensions
+        state_dict = checkpoint['model_state_dict']
+        
+        # Get TEMPORAL dim from time_embeddings shape
+        temporal_dim = state_dict['temporal_adapter.time_embeddings.time_embeddings'].shape[1]
+        
+        # Get MU embed_dim from embedding shape
+        mu_embed_dim = state_dict['mu_adapter.token_embedding.embedding.weight'].shape[1]
+        
+        # Check if using full MU model
+        use_full_mu = any('block_layers' in k for k in state_dict.keys())
+        use_contextual = any('contextual_refiner' in k for k in state_dict.keys())
+        
+        # Get hidden dim from state_projector
+        hidden_dim = state_dict['state_projector.proj_combined.weight'].shape[0]
+        
+        config = {
+            'stage': 3,
+            'components': {
+                'mu': {
+                    'vocab_size': 50257,
+                    'embed_dim': mu_embed_dim,
+                    'use_full_model': use_full_mu,
+                    'use_contextual_refinement': use_contextual,
+                },
+                'temporal': {
+                    'time_dim': temporal_dim,
+                },
+                'graph': {
+                    'semantic_k': 10,
+                    'semantic_threshold': 0.05,
+                    'use_mutual_knn': False,
+                    'semantic_blocks': ['I', 'R2', 'K'],
+                    'random_shortcuts': 0.2,
+                }
+            },
+            'model': {
+                'hidden_dim': hidden_dim,
+                'n_layers': 4,
+                'n_heads': 8,
+                'use_rope': True,
+                'combination_mode': 'concat'
+            }
+        }
+        
+        print(f"  Detected: MU {mu_embed_dim}D, TEMPORAL {temporal_dim}D, Hidden {hidden_dim}D")
+        print(f"  Full MU: {use_full_mu}, Contextual: {use_contextual}")
+    
+    # Create model with correct config
+    print("\nCreating model...")
     model = StateCorePipeline(config).to(args.device)
     
-    # Load checkpoint
-    if Path(args.checkpoint).exists():
-        checkpoint = torch.load(args.checkpoint, map_location=args.device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+    # Load state dict with strict=False to handle minor mismatches
+    print("Loading weights...")
+    try:
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         print(f"✓ Loaded checkpoint from {args.checkpoint}")
-    else:
-        print(f"⚠️  Checkpoint not found: {args.checkpoint}")
-        print("   Analyzing untrained model (for testing)")
+    except Exception as e:
+        print(f"⚠️  Error loading checkpoint: {e}")
+        print("   Attempting to load with strict=False...")
+        missing, unexpected = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        if missing:
+            print(f"   Missing keys: {len(missing)}")
+        if unexpected:
+            print(f"   Unexpected keys: {len(unexpected)}")
+        print("   Continuing with loaded weights...")
     
     # Load tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
