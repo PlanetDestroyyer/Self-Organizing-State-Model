@@ -331,7 +331,7 @@ def main():
     print(f"Batch size: {args.batch_size}")
     print()
     
-    # Configuration
+    # Configuration variables
     BATCH_SIZE = args.batch_size
     SEQ_LEN = 64
     EPOCHS = args.epochs
@@ -344,50 +344,69 @@ def main():
     print()
     
     # Create SOSM pipeline (Full system - Stage 3)
-    print("Creating SOSM pipeline (Stage 3: Full System)...")
+    print("Creating SOSM pipeline (Stage 3: Full System with Option 2)...")
+    
+    # Configuration - OPTION 2: Full MU with Increased Capacity
+    # Goal: Reduce semantic block collapse (currently 0.99 similarity)
+    # Strategy: More capacity per block (128D ÷ 16 = 8D per block vs 4D before)
     config = {
         'stage': 3,  # Full system with graph routing
         'components': {
             'mu': {
                 'vocab_size': VOCAB_SIZE,
-                'embed_dim': 64,
+                'embed_dim': 128,          # ← 2× INCREASED (was 64)
                 'max_seq_len': SEQ_LEN,
-                'use_full_model': True,  # PHASE 2: Full 16-block attention
-                'n_layers': 2,  # Number of block attention layers
+                'use_full_model': True,     # ← ENABLED: Full 16-block architecture
+                'mu_layers': 6,             # ← INCREASED from 1 (deeper processing)
                 'use_factorized_embeddings': True,  # PHASE 2.2: 2× reduction
-                'factorized_dim': 32,
+                'factorized_dim': 64,      # ← Adjusted (was 32)
                 'use_contextual_refinement': True,  # PHASE 2.3: 3-TOKEN WINDOW
-                'window_size': 3,  # PHASE 2.3: Local context
+                'context_window': 3,       # Local context
             },
             'temporal': {
-                'time_dim': 32,
+                'time_dim': 64,            # ← 2× INCREASED (was 32)
                 'learning_mode': 'gradient',
             },
             'k1': {
                 'analysis_only': False,  # FIX: Enable K-1 weight updates
             },
             'graph': {
-                'enabled': True,  # ENABLED
+                'enabled': True,
                 'sequential_edges': True,
-                'semantic_edges': True,  # ENABLED
-                'semantic_method': 'topk',  # Top-K method (not threshold)
-                'semantic_k': 10,  # PHASE 2.3: Optimized via K study (PPL 1118.07)
-                'semantic_threshold': 0.05,  # Optional minimum threshold
+                'semantic_edges': True,
+                'semantic_method': 'topk',
+                'semantic_k': 10,          # PHASE 2.3: Optimized via K study
+                'semantic_threshold': 0.05,
                 'random_shortcuts': 0.20,  # Small-world optimal (20%)
-                'use_mutual_knn': False,  # FIX: Disabled to keep asymmetric edges
-                'streaming_topk': True,  # PHASE 1: Streaming Top-K (O(T×K) memory)
-                'semantic_blocks': ['I', 'R2', 'K'],  # PHASE 2: Use I, R2, K blocks for similarity (12D)
+                'use_mutual_knn': False,   # FIX: Disabled to keep asymmetric edges
+                'streaming_topk': True,    # PHASE 1: Streaming Top-K (O(T×K) memory)
+                'semantic_blocks': ['I', 'R2', 'K'],  # PHASE 2: Use I, R2, K blocks (24D now, was 12D)
             }
         },
         'model': {
-            'hidden_dim': 896,  # PHASE 1: Increased to compensate for fewer layers
-            'n_layers': 4,  # PHASE 1: Reduced from 6 (graph does heavy lifting)
+            'hidden_dim': 1024,           # ← INCREASED (was 896) to match 128+64=192 input
+            'n_layers': 6,                # ← INCREASED from 4 (more transformer layers)
             'n_heads': 8,
-            'dropout': 0.3,  # FIX: Increased from 0.1 to prevent overfitting
+            'dropout': 0.3,               # FIX: Increased from 0.1 to prevent overfitting
             'combination_mode': 'concat',
-            'use_typed_edges': True,  # PHASE 2.3: TYPED EDGE EMBEDDINGS
+            'use_rope': True,             # RoPE for better position encoding
+            'use_typed_edges': True,      # PHASE 2.4: TYPED EDGE EMBEDDINGS
         }
     }
+    
+    print(\"\\n\" + \"=\"*70)
+    print(\"OPTION 2: FULL MU WITH INCREASED CAPACITY\")
+    print(\"=\"*70)
+    print(\"Changes from Phase 2.4:\")
+    print(\"  - MU embed_dim: 64 → 128 (8D per block vs 4D)\")
+    print(\"  - MU layers: 1 → 6 (deeper semantic processing)\")
+    print(\"  - TEMPORAL dim: 32 → 64 (richer temporal patterns)\")
+    print(\"  - Hidden dim: 896 → 1024 (match increased input)\")
+    print(\"  - Transformer layers: 4 → 6 (more capacity)\")
+    print(\"\\nGoal: Reduce block similarity from 0.99 to <0.6\")
+    print(\"Expected params: ~130M (vs 88M before)\")
+    print(\"=\"*70)
+    print()
     
     pipeline = StateCorePipeline(config).to(device)
     n_params = sum(p.numel() for p in pipeline.parameters())
