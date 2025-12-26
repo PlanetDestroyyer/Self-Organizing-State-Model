@@ -356,9 +356,9 @@ def main():
                 'vocab_size': VOCAB_SIZE,
                 'embed_dim': 128,          # ← 2× INCREASED (was 64)
                 'max_seq_len': SEQ_LEN,
-                'use_full_model': True,     # ← ENABLED: Full 16-block architecture
-                'mu_layers': 6,             # ← INCREASED from 1 (deeper processing)
-                'use_factorized_embeddings': True,  # PHASE 2.2: 2× reduction
+                'use_full_model': False,    # ← DISABLED: Full MU requires 64D (8×8 structure)
+                                           # Using simple embeddings for 128D capacity
+                'use_factorized_embeddings': True,  # PHASE 2.2: Parameter reduction
                 'factorized_dim': 64,      # ← Adjusted (was 32)
                 'use_contextual_refinement': True,  # PHASE 2.3: 3-TOKEN WINDOW
                 'context_window': 3,       # Local context
@@ -395,12 +395,12 @@ def main():
     }
     
     print("\n" + "="*70)
-    print("OPTION 2: FULL MU WITH INCREASED CAPACITY")
+    print("OPTION 2: INCREASED SEMANTIC CAPACITY (128D)")
     print("="*70)
     print("Changes from Phase 2.4:")
-    print("  - MU embed_dim: 64 → 128 (8D per block vs 4D)")
-    print("  - MU layers: 1 → 6 (deeper semantic processing)")
-    print("  - TEMPORAL dim: 32 → 64 (richer temporal patterns)")
+    print("  - MU embed_dim: 64 → 128 (2× semantic capacity)")
+    print("  - Full MU: Disabled (requires 64D for 8×8 structure)")
+    print("  - Using: Simple embeddings + contextual refinement")
     print("  - Hidden dim: 896 → 1024 (match increased input)")
     print("  - Transformer layers: 4 → 6 (more capacity)")
     print("\nGoal: Reduce block similarity from 0.99 to <0.6")
