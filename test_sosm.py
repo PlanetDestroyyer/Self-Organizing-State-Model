@@ -48,8 +48,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Comprehensive SOSM Test')
-    parser.add_argument('--epochs', type=int, default=3,
-                        help='Number of training epochs (default: 3)')
+    parser.add_argument('--epochs', type=int, default=15,
+                        help='Number of training epochs (default: 15)')
     parser.add_argument('--batch-size', type=int, default=64,
                         help='Batch size (default: 64)')
     parser.add_argument('--skip-training', action='store_true',
