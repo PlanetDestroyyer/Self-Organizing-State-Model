@@ -24,6 +24,9 @@ components:
     random_shortcuts: 0.2
     semantic_blocks: ['I', 'R2', 'K']
     
+  k1:
+    analysis_only: false  # Enable K-1 weight updates
+    
 model:
   hidden_dim: 1024
   n_layers: 6
