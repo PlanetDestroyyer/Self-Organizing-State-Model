@@ -100,8 +100,8 @@ class StateUpdateOperator(nn.Module):
         # Apply RoPE to Q and K
         if self.use_rope:
             cos, sin = self.rope(T)
-            Q = apply_rotary_pos_emb(Q, cos, sin)
-            K = apply_rotary_pos_emb(K, cos, sin)
+            # Apply rotations (returns tuple of rotated Q and K)
+            Q, K = apply_rotary_pos_emb(Q, K, cos, sin)
         
         # Reshape for attention: [B, n_heads, T, head_dim]
         Q = Q.transpose(1, 2)
