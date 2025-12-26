@@ -461,7 +461,8 @@ def main():
     print(f"      - FlashAttention: {flash_status}")
     print(f"      - Fibonacci shortcuts: Active")
     
-    k1_mode = "Analysis mode" if config['components']['k1'].get('analysis_only', False) else "Active updates"
+    k1_config = config.get('components', {}).get('k1', {})
+    k1_mode = "Analysis mode" if k1_config.get('analysis_only', False) else "Active updates"
     print(f"   🧠 K-1: {k1_mode}")
     print()
     
