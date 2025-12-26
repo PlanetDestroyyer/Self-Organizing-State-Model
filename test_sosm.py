@@ -54,6 +54,8 @@ def parse_args():
                         help='Batch size (default: 64)')
     parser.add_argument('--skip-training', action='store_true',
                         help='Skip training, load from checkpoint')
+    parser.add_argument('--config', type=str, default=None,
+                        help='Path to config YAML file (e.g., configs/phase_2_5_tier1.yaml)')
     return parser.parse_args()
 
 
@@ -344,67 +346,82 @@ def main():
     print()
     
     # Create SOSM pipeline (Full system - Stage 3)
-    print("Creating SOSM pipeline (Stage 3: Full System with Option 2)...")
+    print("Creating SOSM pipeline (Stage 3: Full System)...")
     
-    # Configuration - OPTION 2: Full MU with Increased Capacity
-    # Goal: Reduce semantic block collapse (currently 0.99 similarity)
-    # Strategy: More capacity per block (128D ÷ 16 = 8D per block vs 4D before)
-    config = {
-        'stage': 3,  # Full system with graph routing
-        'components': {
-            'mu': {
-                'vocab_size': VOCAB_SIZE,
-                'embed_dim': 128,          # ← 2× INCREASED (was 64)
-                'max_seq_len': SEQ_LEN,
-                'use_full_model': False,    # ← DISABLED: Full MU requires 64D (8×8 structure)
-                                           # Using simple embeddings for 128D capacity
-                'use_factorized_embeddings': True,  # PHASE 2.2: Parameter reduction
-                'factorized_dim': 64,      # ← Adjusted (was 32)
-                'use_contextual_refinement': True,  # PHASE 2.3: 3-TOKEN WINDOW
-                'context_window': 3,       # Local context
+    # Load configuration from file or use default
+    if args.config:
+        print(f"📁 Loading config from: {args.config}")
+        import yaml
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+        print("✓ Config loaded from file")
+    else:
+        print("Using default configuration (Option 2: Increased Capacity)")
+        # Configuration - OPTION 2: Full MU with Increased Capacity
+        # Goal: Reduce semantic block collapse (currently 0.99 similarity)
+        # Strategy: More capacity per block (128D ÷ 16 = 8D per block vs 4D before)
+        config = {
+            'stage': 3,  # Full system with graph routing
+            'components': {
+                'mu': {
+                    'vocab_size': VOCAB_SIZE,
+                    'embed_dim': 128,          # ← 2× INCREASED (was 64)
+                    'max_seq_len': SEQ_LEN,
+                    'use_full_model': False,    # ← DISABLED: Full MU requires 64D (8×8 structure)
+                                               # Using simple embeddings for 128D capacity
+                    'use_factorized_embeddings': True,  # PHASE 2.2: Parameter reduction
+                    'factorized_dim': 64,      # ← Adjusted (was 32)
+                    'use_contextual_refinement': True,  # PHASE 2.3: 3-TOKEN WINDOW
+                    'context_window': 3,       # Local context
+                },
+                'temporal': {
+                    'time_dim': 64,            # ← 2× INCREASED (was 32)
+                    'learning_mode': 'gradient',
+                },
+                'k1': {
+                    'analysis_only': False,  # FIX: Enable K-1 weight updates
+                },
+                'graph': {
+                    'enabled': True,
+                    'sequential_edges': True,
+                    'semantic_edges': True,
+                    'semantic_method': 'topk',
+                    'semantic_k': 10,          # PHASE 2.3: Optimized via K study
+                    'semantic_threshold': 0.05,
+                    'random_shortcuts': 0.20,  # Small-world optimal (20%)
+                    'use_mutual_knn': False,   # FIX: Disabled to keep asymmetric edges
+                    'streaming_topk': True,    # PHASE 1: Streaming Top-K (O(T×K) memory)
+                    'semantic_blocks': ['I', 'R2', 'K'],  # PHASE 2: Use I, R2, K blocks (24D now, was 12D)
+                }
             },
-            'temporal': {
-                'time_dim': 64,            # ← 2× INCREASED (was 32)
-                'learning_mode': 'gradient',
-            },
-            'k1': {
-                'analysis_only': False,  # FIX: Enable K-1 weight updates
-            },
-            'graph': {
-                'enabled': True,
-                'sequential_edges': True,
-                'semantic_edges': True,
-                'semantic_method': 'topk',
-                'semantic_k': 10,          # PHASE 2.3: Optimized via K study
-                'semantic_threshold': 0.05,
-                'random_shortcuts': 0.20,  # Small-world optimal (20%)
-                'use_mutual_knn': False,   # FIX: Disabled to keep asymmetric edges
-                'streaming_topk': True,    # PHASE 1: Streaming Top-K (O(T×K) memory)
-                'semantic_blocks': ['I', 'R2', 'K'],  # PHASE 2: Use I, R2, K blocks (24D now, was 12D)
+            'model': {
+                'hidden_dim': 1024,           # ← INCREASED (was 896) to match 128+64=192 input
+                'n_layers': 6,                # ← INCREASED from 4 (more transformer layers)
+                'n_heads': 8,
+                'dropout': 0.3,               # FIX: Increased from 0.1 to prevent overfitting
+                'combination_mode': 'concat',
+                'use_rope': True,             # RoPE for better position encoding
+                'use_typed_edges': True,      # PHASE 2.4: TYPED EDGE EMBEDDINGS
             }
-        },
-        'model': {
-            'hidden_dim': 1024,           # ← INCREASED (was 896) to match 128+64=192 input
-            'n_layers': 6,                # ← INCREASED from 4 (more transformer layers)
-            'n_heads': 8,
-            'dropout': 0.3,               # FIX: Increased from 0.1 to prevent overfitting
-            'combination_mode': 'concat',
-            'use_rope': True,             # RoPE for better position encoding
-            'use_typed_edges': True,      # PHASE 2.4: TYPED EDGE EMBEDDINGS
         }
-    }
+    
+    # Display configuration info
+    reg_enabled = config.get('regularization', {}).get('enabled', False)
+    
     
     print("\n" + "="*70)
-    print("OPTION 2: INCREASED SEMANTIC CAPACITY (128D)")
-    print("="*70)
-    print("Changes from Phase 2.4:")
-    print("  - MU embed_dim: 64 → 128 (2× semantic capacity)")
-    print("  - Full MU: Disabled (requires 64D for 8×8 structure)")
-    print("  - Using: Simple embeddings + contextual refinement")
-    print("  - Hidden dim: 896 → 1024 (match increased input)")
-    print("  - Transformer layers: 4 → 6 (more capacity)")
-    print("\nGoal: Reduce block similarity from 0.99 to <0.6")
-    print("Expected params: ~130M (vs 88M before)")
+    mu_dim = config.get('components', {}).get('mu', {}).get('embed_dim', 128)
+    print(f"CONFIGURATION: MU={mu_dim}D, Stage {config.get('stage', 3)}")
+    if reg_enabled:
+        lambda_ortho = config.get('regularization', {}).get('lambda_ortho', 0.01)
+        lambda_var = config.get('regularization', {}).get('lambda_var', 0.01)
+        pair_norm = config.get('regularization', {}).get('enable_pair_norm', False)
+        print("PHASE 2.5: Block Regularization ENABLED")
+        print(f"  - Orthogonality Loss (λ={lambda_ortho})")
+        print(f"  - Variance Loss (λ={lambda_var})")
+        print(f"  - PairNorm: {'✓' if pair_norm else '✗'}")
+    else:
+        print("Regularization: Disabled (default Option 2)")
     print("="*70)
     print()
 
