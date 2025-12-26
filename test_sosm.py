@@ -181,11 +181,11 @@ def test_disambiguation(pipeline, tokenizer, prompt1, prompt2, test_name):
     
     # PHASE 2.4: Use nucleus sampling instead of greedy
     next_token1 = nucleus_sampling(logits1[0, -1], p=0.9, temperature=0.8)
-    next_word1 = tokenizer.decode([next_token1])
+    next_word1 = tokenizer.decode([next_token1.item()])  # Convert tensor to int
     
     # Get top 5 predictions
     top5_logits1, top5_indices1 = logits1[0, -1].topk(5)
-    top5_words1 = [tokenizer.decode([idx]) for idx in top5_indices1]
+    top5_words1 = [tokenizer.decode([idx.item()]) for idx in top5_indices1]  # Convert tensors to ints
     
     print(f"  Next token: '{next_word1}'")
     print(f"  Top 5: {top5_words1}")
@@ -206,11 +206,11 @@ def test_disambiguation(pipeline, tokenizer, prompt1, prompt2, test_name):
     
     # PHASE 2.4: Use nucleus sampling instead of greedy
     next_token2 = nucleus_sampling(logits2[0, -1], p=0.9, temperature=0.8)
-    next_word2 = tokenizer.decode([next_token2])
+    next_word2 = tokenizer.decode([next_token2.item()])  # Convert tensor to int
     
     # Get top 5 predictions
     top5_logits2, top5_indices2 = logits2[0, -1].topk(5)
-    top5_words2 = [tokenizer.decode([idx]) for idx in top5_indices2]
+    top5_words2 = [tokenizer.decode([idx.item()]) for idx in top5_indices2]  # Convert tensors to ints
     
     print(f"  Next token: '{next_word2}'")
     print(f"  Top 5: {top5_words2}")
