@@ -1,0 +1,47 @@
+# Phase 2.5: Configuration with Block Regularization
+# Tier 1 Implementation - Information-Theoretic Regularization
+
+stage: 3  # Full system
+
+components:
+  mu:
+    vocab_size: 50257
+    embed_dim: 64  # 16 blocks x 4D
+    max_seq_len: 512
+    use_full_model: false
+    use_contextual_refinement: false
+    
+  temporal:
+    time_dim: 64
+    learning_mode: 'gradient'
+    
+  graph:
+    sequential_edges: true
+    semantic_edges: true
+    semantic_threshold: 0.05
+    semantic_k: 10
+    use_mutual_knn: false
+    random_shortcuts: 0.2
+    semantic_blocks: ['I', 'R2', 'K']
+    
+model:
+  hidden_dim: 1024
+  n_layers: 6
+  n_heads: 8
+  dropout: 0.1
+  use_rope: true
+  combination_mode: 'concat'
+
+# PHASE 2.5: Block Regularization Configuration
+regularization:
+  enabled: true                # Enable regularization losses
+  lambda_ortho: 0.01          # Orthogonality loss weight
+  lambda_var: 0.01            # Variance loss weight
+  enable_pair_norm: true      # Enable PairNorm in operators
+
+training:
+  batch_size: 64
+  learning_rate: 0.0002
+  epochs: 10
+  warmup_steps: 100
+  log_interval: 50

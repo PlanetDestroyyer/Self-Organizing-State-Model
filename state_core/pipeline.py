@@ -22,6 +22,8 @@ from .adapters import MUAdapter, TemporalAdapter, K1Adapter
 from .graph import GraphBuilder, GraphMaskConverter
 from .config import load_config, get_default_config
 from .utils.rope import RoPEEmbedding, apply_rotary_pos_emb  # PHASE 2.2: RoPE
+from .losses import OrthogonalityLoss, VarianceLoss  # PHASE 2.5: Block regularization
+from .layers import PairNorm  # PHASE 2.5: Graph oversmoothing prevention
 
 
 class StateUpdateOperator(nn.Module):
@@ -75,6 +77,9 @@ class StateUpdateOperator(nn.Module):
         )
         
         # NO GATING - use standard residual like proven SOTA models (MU, TEMPORAL)
+        
+        # PHASE 2.5: PairNorm for preventing oversmoothing (set externally)
+        self.pair_norm = None
     
     def _rotate_half(self, x: torch.Tensor) -> torch.Tensor:
         """Rotate half the hidden dims (for RoPE)."""
@@ -140,6 +145,11 @@ class StateUpdateOperator(nn.Module):
         
         # Residual
         x = x + attn_out
+        
+        # PHASE 2.5: PairNorm to prevent oversmoothing
+        # Applied after attention to maintain pairwise distances
+        if hasattr(self, 'pair_norm') and self.pair_norm is not None:
+            x = self.pair_norm(x)
         
         # Feed-forward
         x = x + self.ff(self.norm2(x))
@@ -357,6 +367,29 @@ class StateCorePipeline(nn.Module):
         self.output_norm = nn.LayerNorm(hidden_dim)
         self.output_proj = nn.Linear(hidden_dim, self.vocab_size)
         
+        # PHASE 2.5: Block Regularization to Prevent Semantic Collapse
+        # Configuration
+        reg_cfg = config.get('regularization', {})
+        self.enable_regularization = reg_cfg.get('enabled', False)
+        self.lambda_ortho = reg_cfg.get('lambda_ortho', 0.01)
+        self.lambda_var = reg_cfg.get('lambda_var', 0.01)
+        self.enable_pair_norm = reg_cfg.get('enable_pair_norm', False)
+        
+        # Loss modules
+        if self.enable_regularization:
+            self.ortho_loss = OrthogonalityLoss()
+            self.var_loss = VarianceLoss(target_std=1.0)
+            print(f"  ✓ Block regularization enabled (λ_ortho={self.lambda_ortho}, λ_var={self.lambda_var})")
+        else:
+            self.ortho_loss = None
+            self.var_loss = None
+        
+        # PairNorm for operators
+        if self.enable_pair_norm:
+            for operator in self.operators:
+                operator.pair_norm = PairNorm(scale=1.0, learnable=False)
+            print("  ✓ PairNorm enabled in all operators (prevents oversmoothing)")
+        
         # K-1 Adapter (created after model is built)
         self.k1_adapter = None
         
@@ -454,6 +487,30 @@ class StateCorePipeline(nn.Module):
         # === Step 6: Output Projection ===
         h = self.output_norm(h)
         logits = self.output_proj(h)
+        
+        # PHASE 2.5: Compute regularization losses
+        reg_losses = {}
+        if self.enable_regularization and self.training:
+            # Orthogonality loss on semantic state
+            ortho_loss_val, ortho_info = self.ortho_loss(state.semantic_state)
+            reg_losses['orthogonality'] = ortho_loss_val
+            reg_losses['ortho_info'] = ortho_info
+            
+            # Variance loss on semantic state
+            var_loss_val, var_info = self.var_loss(state.semantic_state)
+            reg_losses['variance'] = var_loss_val
+            reg_losses['var_info'] = var_info
+            
+            # Weighted total regularization
+            reg_losses['total_reg'] = (
+                self.lambda_ortho * ortho_loss_val +
+                self.lambda_var * var_loss_val
+            )
+        else:
+            reg_losses['total_reg'] = torch.tensor(0.0, device=logits.device)
+        
+        # Add regularization to state for tracking
+        state.reg_losses = reg_losses
         
         if return_state:
             return logits, state
