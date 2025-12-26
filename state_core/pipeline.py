@@ -75,6 +75,11 @@ class StateUpdateOperator(nn.Module):
         )
         
         # NO GATING - use standard residual like proven SOTA models (MU, TEMPORAL)
+    
+    def _rotate_half(self, x: torch.Tensor) -> torch.Tensor:
+        """Rotate half the hidden dims (for RoPE)."""
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat([-x2, x1], dim=-1)
 
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -99,9 +104,16 @@ class StateUpdateOperator(nn.Module):
         
         # Apply RoPE to Q and K
         if self.use_rope:
-            cos, sin = self.rope(T)
-            # Apply rotations (returns tuple of rotated Q and K)
-            Q, K = apply_rotary_pos_emb(Q, K, cos, sin)
+            cos, sin = self.rope(T)  # [T, head_dim]
+            
+            # Reshape cos/sin to broadcast correctly with Q/K: [B, T, n_heads, head_dim]
+            # cos/sin: [T, head_dim] → [1, T, 1, head_dim]
+            cos = cos.unsqueeze(0).unsqueeze(2)  # [1, T, 1, head_dim]
+            sin = sin.unsqueeze(0).unsqueeze(2)  # [1, T, 1, head_dim]
+            
+            # Apply rotations
+            Q = Q * cos + self._rotate_half(Q) * sin
+            K = K * cos + self._rotate_half(K) * sin
         
         # Reshape for attention: [B, n_heads, T, head_dim]
         Q = Q.transpose(1, 2)
