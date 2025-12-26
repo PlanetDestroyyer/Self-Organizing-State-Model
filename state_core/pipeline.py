@@ -21,6 +21,7 @@ from .stages import StageController
 from .adapters import MUAdapter, TemporalAdapter, K1Adapter
 from .graph import GraphBuilder, GraphMaskConverter
 from .config import load_config, get_default_config
+from .utils.rope import RoPEEmbedding, apply_rotary_pos_emb  # PHASE 2.2: RoPE
 
 
 class StateUpdateOperator(nn.Module):
@@ -42,13 +43,26 @@ class StateUpdateOperator(nn.Module):
     - Access embeddings directly (only projected state)
     """
     
-    def __init__(self, dim: int, n_heads: int, ff_dim: int, dropout: float = 0.1):
+    def __init__(self, dim: int, n_heads: int, ff_dim: int, dropout: float = 0.1, use_rope: bool = True):
         super().__init__()
         self.dim = dim
+        self.n_heads = n_heads
+        self.head_dim = dim // n_heads
+        self.use_rope = use_rope
+        
+        # PHASE 2.2: RoPE for better position encoding
+        if use_rope:
+            self.rope = RoPEEmbedding(dim=self.head_dim, max_len=8192)
         
         # Pre-norm attention
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, n_heads, dropout=dropout, batch_first=True)
+        
+        # Manual attention (to apply RoPE)
+        self.q_proj = nn.Linear(dim, dim)
+        self.k_proj = nn.Linear(dim, dim)
+        self.v_proj = nn.Linear(dim, dim)
+        self.out_proj = nn.Linear(dim, dim)
+        self.dropout = nn.Dropout(dropout)
         
         # Pre-norm feed-forward
         self.norm2 = nn.LayerNorm(dim)
@@ -64,7 +78,7 @@ class StateUpdateOperator(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Update state representation.
+        Update state representation with RoPE.
 
         Args:
             x: Projected state [B, T, dim]
@@ -73,15 +87,46 @@ class StateUpdateOperator(nn.Module):
         Returns:
             Updated state representation [B, T, dim]
         """
-        # Self-attention with optional graph mask
+        B, T, D = x.shape
+        
+        # Pre-norm
         normed = self.norm1(x)
+        
+        # PHASE 2.2: Manual attention with RoPE
+        Q = self.q_proj(normed).view(B, T, self.n_heads, self.head_dim)
+        K = self.k_proj(normed).view(B, T, self.n_heads, self.head_dim)
+        V = self.v_proj(normed).view(B, T, self.n_heads, self.head_dim)
+        
+        # Apply RoPE to Q and K
+        if self.use_rope:
+            cos, sin = self.rope(T)
+            Q = apply_rotary_pos_emb(Q, cos, sin)
+            K = apply_rotary_pos_emb(K, cos, sin)
+        
+        # Reshape for attention: [B, n_heads, T, head_dim]
+        Q = Q.transpose(1, 2)
+        K = K.transpose(1, 2)
+        V = V.transpose(1, 2)
+        
+        # Scaled dot-product attention
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        
+        # Apply graph mask if provided
         if mask is not None:
-            attn_out, _ = self.attn(normed, normed, normed, attn_mask=mask)
-        else:
-            # Unrestricted attention (graph disabled)
-            attn_out, _ = self.attn(normed, normed, normed)
-
-        # FIXED: Standard residual (no gating - like MU and TEMPORAL!)
+            # mask is [T, T], expand to [B, n_heads, T, T]
+            attn_scores = attn_scores + mask.unsqueeze(0).unsqueeze(0)
+        
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        
+        # Apply attention to values
+        attn_out = torch.matmul(attn_weights, V)  # [B, n_heads, T, head_dim]
+        
+        # Reshape back: [B, T, dim]
+        attn_out = attn_out.transpose(1, 2).contiguous().view(B, T, D)
+        attn_out = self.out_proj(attn_out)
+        
+        # Residual
         x = x + attn_out
         
         # Feed-forward
@@ -284,11 +329,17 @@ class StateCorePipeline(nn.Module):
             combination_mode=combination_mode
         )
 
+        # PHASE 2.2: Enable RoPE in operators
+        use_rope = model_cfg.get('use_rope', True)  # Default: enabled
+        
         # State Update Operators (NOT Transformer layers - computation primitives)
         self.operators = nn.ModuleList([
-            StateUpdateOperator(hidden_dim, n_heads, hidden_dim * 4, dropout)
+            StateUpdateOperator(hidden_dim, n_heads, hidden_dim * 4, dropout, use_rope=use_rope)
             for _ in range(n_layers)
         ])
+        
+        if use_rope:
+            print("  ✓ RoPE (Rotary Position Embeddings) enabled")
         
         # Output projection
         self.output_norm = nn.LayerNorm(hidden_dim)
