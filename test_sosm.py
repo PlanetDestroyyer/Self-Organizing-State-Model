@@ -394,19 +394,20 @@ def main():
         }
     }
     
-    print(\"\\n\" + \"=\"*70)
-    print(\"OPTION 2: FULL MU WITH INCREASED CAPACITY\")
-    print(\"=\"*70)
-    print(\"Changes from Phase 2.4:\")
-    print(\"  - MU embed_dim: 64 → 128 (8D per block vs 4D)\")
-    print(\"  - MU layers: 1 → 6 (deeper semantic processing)\")
-    print(\"  - TEMPORAL dim: 32 → 64 (richer temporal patterns)\")
-    print(\"  - Hidden dim: 896 → 1024 (match increased input)\")
-    print(\"  - Transformer layers: 4 → 6 (more capacity)\")
-    print(\"\\nGoal: Reduce block similarity from 0.99 to <0.6\")
-    print(\"Expected params: ~130M (vs 88M before)\")
-    print(\"=\"*70)
+    print("\n" + "="*70)
+    print("OPTION 2: FULL MU WITH INCREASED CAPACITY")
+    print("="*70)
+    print("Changes from Phase 2.4:")
+    print("  - MU embed_dim: 64 → 128 (8D per block vs 4D)")
+    print("  - MU layers: 1 → 6 (deeper semantic processing)")
+    print("  - TEMPORAL dim: 32 → 64 (richer temporal patterns)")
+    print("  - Hidden dim: 896 → 1024 (match increased input)")
+    print("  - Transformer layers: 4 → 6 (more capacity)")
+    print("\nGoal: Reduce block similarity from 0.99 to <0.6")
+    print("Expected params: ~130M (vs 88M before)")
+    print("="*70)
     print()
+
     
     pipeline = StateCorePipeline(config).to(device)
     n_params = sum(p.numel() for p in pipeline.parameters())
