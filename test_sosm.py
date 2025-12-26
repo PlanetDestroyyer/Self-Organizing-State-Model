@@ -402,6 +402,13 @@ def main():
                 'combination_mode': 'concat',
                 'use_rope': True,             # RoPE for better position encoding
                 'use_typed_edges': True,      # PHASE 2.4: TYPED EDGE EMBEDDINGS
+            },
+            # PHASE 2.5: Block Regularization (Tier 1) - NOW DEFAULT
+            'regularization': {
+                'enabled': True,              # Always enabled to prevent block collapse
+                'lambda_ortho': 0.01,         # Orthogonality loss weight
+                'lambda_var': 0.01,           # Variance loss weight
+                'enable_pair_norm': True,     # PairNorm in all operators
             }
         }
     
