@@ -151,7 +151,7 @@ Epoch 5:  PPL 1.06   (Train: 0.06, Test: 0.054)
 **Before vs After**:
 | Metric | Phase 2.4 | Phase 2.5 | Improvement |
 |--------|-----------|-----------|-------------|
-| Homonym Separation | 0.002 | 0.796 | **398× better** ✅ |
+| Homonym Separation | 0.002 | 0.602 (confirmed 2nd run) | **300× better** ✅ |
 | Block Similarity | 0.99 (collapsed) | 0.39-0.48 (diverse) | **Specialized** ✅ |
 | Perplexity | 1.42 | 1.06 | **25% better** ✅ |
 | Disambiguation | 11/11 | 11/11 | **Maintained** ✅ |
