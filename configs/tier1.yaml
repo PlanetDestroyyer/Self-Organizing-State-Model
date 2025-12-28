@@ -1,0 +1,60 @@
+# Tier 1 Configuration (PROVEN - 0.796 separation)
+# This is the configuration that achieved excellent results
+
+stage: 3
+
+components:
+  mu:
+    vocab_size: 50257
+    embed_dim: 64              # 16 blocks × 4D (PROVEN)
+    max_seq_len: 512
+    use_full_model: false
+    use_factorized_embeddings: true
+    factorized_dim: 32
+    use_contextual_refinement: false  # DISABLED for Tier 1
+    
+  temporal:
+    time_dim: 64
+    learning_mode: 'gradient'
+    
+  k1:
+    analysis_only: false
+    
+  graph:
+    enabled: true
+    sequential_edges: true
+    semantic_edges: true
+    semantic_method: 'topk'
+    semantic_k: 10              # Optimized via K study
+    semantic_threshold: 0.05
+    random_shortcuts: 0.20
+    use_mutual_knn: false
+    streaming_topk: true
+    semantic_blocks: ['I', 'R2', 'K']  # 3 blocks for semantic edges
+    
+model:
+  hidden_dim: 1024
+  n_layers: 6
+  n_heads: 8
+  dropout: 0.1
+  combination_mode: 'concat'
+  use_rope: true
+  use_typed_edges: true
+
+# Tier 1 Regularization (PROVEN WEIGHTS)
+regularization:
+  enabled: true
+  lambda_ortho: 0.01          # Proven weight
+  lambda_var: 0.01            # Proven weight
+  enable_pair_norm: true
+  
+  # Tier 2 disabled
+  lambda_contrastive: 0.0
+  lambda_usage: 0.0
+
+training:
+  batch_size: 64
+  learning_rate: 0.0002
+  epochs: 5
+  warmup_steps: 100
+  log_interval: 50
