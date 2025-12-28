@@ -1,0 +1,82 @@
+# Tier 2 Regularization Configuration
+# Enhanced block differentiation with contrastive learning and auxiliary tasks
+
+stage: 3  # Full system
+
+components:
+  mu:
+    vocab_size: 50257
+    embed_dim: 64  # 16 blocks x 4D
+    max_seq_len: 512
+    use_full_model: false
+    use_factorized_embeddings: true
+    factorized_dim: 32
+    use_contextual_refinement: false
+    
+  temporal:
+    time_dim: 64
+    learning_mode: 'gradient'
+    
+  k1:
+    analysis_only: false  # Enable K-1 weight updates
+    
+  graph:
+    sequential_edges: true
+    semantic_edges: true
+    semantic_threshold: 0.05
+    semantic_k: 10
+    use_mutual_knn: false
+    random_shortcuts: 0.2
+    semantic_blocks: ['I', 'R2', 'K']
+    
+model:
+  hidden_dim: 1024
+  n_layers: 6
+  n_heads: 8
+  dropout: 0.1
+  use_rope: true
+  combination_mode: 'concat'
+  use_typed_edges: true
+
+# TIER 2: Enhanced Regularization
+regularization:
+  enabled: true
+  
+  # Tier 1 weights (increased for stronger regularization)
+  lambda_ortho: 0.05          # Increased from 0.01
+  lambda_var: 0.05            # Increased from 0.01
+  enable_pair_norm: true
+  
+  # Tier 2: NEW components
+  lambda_contrastive: 0.02    # Contrastive loss for context differentiation
+  lambda_auxiliary: 0.01      # Auxiliary task supervision
+  lambda_usage: 0.005         # Block usage balancing
+  
+  # Contrastive learning config
+  contrastive:
+    temperature: 0.07
+    context_window: 3
+    min_occurrences: 2
+    use_block_level: false    # If true, use BlockContrastiveLoss instead
+  
+  # Auxiliary tasks config
+  auxiliary:
+    enabled: true
+    blocks:
+      I: 'ner'       # Identity → Entity typing
+      R2: 'dep'      # Relations → Dependencies
+      K: 'pos'       # Knowledge → Part-of-speech
+    num_pos_tags: 17   # Universal POS tags
+    num_ner_tags: 9    # CoNLL NER tags (O, PER, ORG, LOC, MISC + B/I prefixes)
+    num_dep_rels: 40   # Universal Dependencies relations
+
+training:
+  batch_size: 64
+  learning_rate: 0.0002
+  epochs: 10
+  warmup_steps: 100
+  log_interval: 50
+  
+  # Auxiliary data (if using)
+  use_auxiliary_data: false  # Disabled for Option A
+  aux_data_ratio: 0.0
