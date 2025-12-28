@@ -55,10 +55,12 @@ class OrthogonalityLoss(nn.Module):
             info: Dict with diagnostic information
         """
         B, T, D = semantic_state.shape
-        assert D == 64, f"Expected 64D semantic state, got {D}D"
+        # Support 64D (16 blocks × 4D) or 128D (32 blocks × 4D) or other multiples
+        assert D % 4 == 0, f"Semantic state dimension {D} must be multiple of 4"
+        num_blocks = D // 4
         
-        # Reshape to separate 16 blocks: [B, T, 16, 4]
-        blocks = semantic_state.view(B, T, 16, 4)
+        # Reshape to separate blocks: [B, T, num_blocks, 4]
+        blocks = semantic_state.view(B, T, num_blocks, 4)
         
         # Flatten spatial dimensions: [B*T, 16, 4]
         blocks_flat = blocks.reshape(-1, 16, 4)
@@ -99,20 +101,20 @@ class OrthogonalityLoss(nn.Module):
         # M = concatenation of all 16 block prototypes
         # Each row is one block's average representation across all tokens
         
-        # Average each block across all tokens: [16, 4]
-        M = block_means  # [16, 4]
+        # Average each block across all tokens: [num_blocks, 4]
+        M = block_means  # [num_blocks, 4]
         
         # But for full orthogonality, we need more dimensions
         # Instead, let's compute pairwise cosine similarity between blocks
         
-        # Normalize each block: [16, 4]
-        M_norm = F.normalize(M, p=2, dim=1)  # [16, 4]
+        # Normalize each block: [num_blocks, 4]
+        M_norm = F.normalize(M, p=2, dim=1)  # [num_blocks, 4]
         
-        # Compute Gram matrix: M M^T : [16, 16]
-        gram = torch.mm(M_norm, M_norm.t())  # [16, 16]
+        # Compute Gram matrix: M M^T : [num_blocks, num_blocks]
+        gram = torch.mm(M_norm, M_norm.t())  # [num_blocks, num_blocks]
         
         # Identity matrix
-        identity = torch.eye(16, device=gram.device)
+        identity = torch.eye(num_blocks, device=gram.device)
         
         # Frobenius norm of (Gram - I)
         ortho_loss = torch.norm(gram - identity, p='fro') ** 2
@@ -168,12 +170,12 @@ class VarianceLoss(nn.Module):
             info: Dict with diagnostic information
         """
         B, T, D = semantic_state.shape
-        assert D == 64, f"Expected 64D semantic state, got {D}D"
+        # Support variable dimensions (64D, 128D, etc.)
         
-        # Flatten batch and time: [B*T, 64]
+        # Flatten batch and time: [B*T, D]
         z = semantic_state.reshape(-1, D)
         
-        # Compute standard deviation per dimension: [64]
+        # Compute standard deviation per dimension: [D]
         std_per_dim = torch.sqrt(z.var(dim=0) + self.eps)  # [64]
         
         # Hinge loss: penalize if std < target_std
