@@ -66,90 +66,73 @@ class ContextContrastiveLoss(nn.Module):
         B, T, D = semantic_state.shape
         device = semantic_state.device
         
-        # Flatten batch dimension for easier processing
+        # FAST PATH: Just compute variance across batch
+        # If same token appears multiple times, we want high variance
+        # (different contexts → different representations)
+        
+        # Flatten batch dimension
         semantic_flat = semantic_state.reshape(B * T, D)  # [B*T, 64]
         tokens_flat = token_ids.reshape(B * T)  # [B*T]
         
-        # Find repeated tokens
-        unique_tokens, counts = torch.unique(tokens_flat, return_counts=True)
-        repeated_mask = counts >= self.min_occurrences
-        repeated_tokens = unique_tokens[repeated_mask]
+        # Find repeated tokens (fast)
+        unique_tokens, inverse_indices, counts = torch.unique(
+            tokens_flat, 
+            return_inverse=True, 
+            return_counts=True
+        )
         
-        if len(repeated_tokens) == 0:
-            # No repeated tokens, return zero loss
+        # Only process tokens that appear 2+ times
+        repeated_mask = counts >= self.min_occurrences
+        
+        if not repeated_mask.any():
             return torch.tensor(0.0, device=device), {
                 'num_pairs': 0,
-                'avg_similarity': 0.0
+                'num_repeated_tokens': 0
             }
         
-        total_loss = 0.0
-        num_pairs = 0
-        total_sim = 0.0
+        # For repeated tokens, compute variance of their representations
+        # High variance = good (different contexts → different states)
+        # Low variance = bad (same representation despite different contexts)
         
-        # For each repeated token
-        for token_id in repeated_tokens:
-            # Find all positions where this token appears
-            positions = (tokens_flat == token_id).nonzero(as_tuple=True)[0]
+        total_variance = 0.0
+        num_repeated = 0
+        
+        for token_idx in repeated_mask.nonzero(as_tuple=True)[0]:
+            # Get all positions of this token
+            mask = (inverse_indices == token_idx)
+            token_reps = semantic_flat[mask]  # [N, 64]
             
-            if len(positions) < 2:
+            if token_reps.shape[0] < 2:
                 continue
             
-            # Get embeddings for all occurrences
-            token_embeddings = semantic_flat[positions]  # [N, 64]
+            # Compute variance across occurrences
+            # High variance = different contexts have different reps (GOOD)
+            variance = token_reps.var(dim=0).mean()  # Average variance across dimensions
             
-            # Normalize embeddings
-            token_embeddings = F.normalize(token_embeddings, p=2, dim=1)
-            
-            # Compute pairwise similarity
-            similarity_matrix = torch.mm(
-                token_embeddings,
-                token_embeddings.t()
-            )  # [N, N]
-            
-            # Create labels: diagonal is positive (same instance)
-            # Off-diagonal is negative (different context)
-            N = len(positions)
-            
-            # For simplicity: treat each occurrence as anchor
-            # Contrast with all other occurrences of same token
-            # (Different contexts should push apart)
-            for i in range(N):
-                # Anchor
-                anchor_sim = similarity_matrix[i]  # [N]
-                
-                # Positive: same instance (just itself, set to high value)
-                anchor_sim[i] = 1.0 / self.temperature
-                
-                # Negatives: all other occurrences (different contexts)
-                negatives = anchor_sim.clone()
-                negatives[i] = -float('inf')  # Mask self
-                
-                # InfoNCE-style loss (maximize dissimilarity with other contexts)
-                # We want different contexts to be dissimilar
-                # So we minimize similarity
-                context_loss = -torch.logsumexp(
-                    -negatives / self.temperature,
-                    dim=0
-                )
-                
-                total_loss += context_loss
-                num_pairs += (N - 1)
-                total_sim += anchor_sim[anchor_sim != 1.0/self.temperature].mean().item()
+            # Loss: minimize negative variance = maximize variance
+            total_variance += variance
+            num_repeated += 1
         
-        if num_pairs == 0:
+        if num_repeated == 0:
             return torch.tensor(0.0, device=device), {
                 'num_pairs': 0,
-                'avg_similarity': 0.0
+                'num_repeated_tokens': 0
             }
         
-        # Average loss
-        loss = total_loss / num_pairs
+        # Average variance
+        avg_variance = total_variance / num_repeated
+        
+        # Loss: we want HIGH variance, so minimize -variance
+        # Or equivalently, add variance as a bonus (negative loss)
+        # But contrastive losses are usually positive, so:
+        # Use target_variance - actual_variance
+        target_variance = 1.0  # Target: high variance
+        loss = torch.clamp(target_variance - avg_variance, min=0.0)
         
         # Statistics
         info = {
-            'num_pairs': num_pairs,
-            'num_repeated_tokens': len(repeated_tokens),
-            'avg_similarity': total_sim / num_pairs if num_pairs > 0 else 0.0
+            'num_repeated_tokens': num_repeated,
+            'avg_variance': avg_variance.item()
         }
         
         return loss, info
