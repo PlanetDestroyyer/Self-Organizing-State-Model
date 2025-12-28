@@ -22,7 +22,12 @@ from .adapters import MUAdapter, TemporalAdapter, K1Adapter
 from .graph import GraphBuilder, GraphMaskConverter
 from .config import load_config, get_default_config
 from .utils.rope import RoPEEmbedding, apply_rotary_pos_emb  # PHASE 2.2: RoPE
-from .losses import OrthogonalityLoss, VarianceLoss  # PHASE 2.5: Block regularization
+from .losses import (
+    OrthogonalityLoss, 
+    VarianceLoss,
+    ContextContrastiveLoss,
+    BlockUsageBalancing
+)  # PHASE 2.5: Block regularization (Tier 1 + Tier 2)
 from .layers import PairNorm  # PHASE 2.5: Graph oversmoothing prevention
 
 
@@ -375,14 +380,36 @@ class StateCorePipeline(nn.Module):
         self.lambda_var = reg_cfg.get('lambda_var', 0.01)
         self.enable_pair_norm = reg_cfg.get('enable_pair_norm', False)
         
-        # Loss modules
+        # Tier 2 weights
+        self.lambda_contrastive = reg_cfg.get('lambda_contrastive', 0.0)
+        self.lambda_usage = reg_cfg.get('lambda_usage', 0.0)
+        
+        # Tier 1 loss modules
         if self.enable_regularization:
             self.ortho_loss = OrthogonalityLoss()
             self.var_loss = VarianceLoss(target_std=1.0)
-            print(f"  ✓ Block regularization enabled (λ_ortho={self.lambda_ortho}, λ_var={self.lambda_var})")
+            print(f"  ✓ Tier 1 regularization enabled (λ_ortho={self.lambda_ortho}, λ_var={self.lambda_var})")
         else:
             self.ortho_loss = None
             self.var_loss = None
+        
+        # Tier 2 loss modules
+        if self.lambda_contrastive > 0:
+            contrastive_cfg = reg_cfg.get('contrastive', {})
+            self.contrastive_loss = ContextContrastiveLoss(
+                temperature=contrastive_cfg.get('temperature', 0.07),
+                context_window=contrastive_cfg.get('context_window', 3),
+                min_occurrences=contrastive_cfg.get('min_occurrences', 2)
+            )
+            print(f"  ✓ Tier 2 contrastive loss enabled (λ={self.lambda_contrastive})")
+        else:
+            self.contrastive_loss = None
+        
+        if self.lambda_usage > 0:
+            self.usage_balance = BlockUsageBalancing(num_blocks=16, block_dim=4)
+            print(f"  ✓ Tier 2 usage balancing enabled (λ={self.lambda_usage})")
+        else:
+            self.usage_balance = None
         
         # PairNorm for operators
         if self.enable_pair_norm:
@@ -488,24 +515,43 @@ class StateCorePipeline(nn.Module):
         h = self.output_norm(h)
         logits = self.output_proj(h)
         
-        # PHASE 2.5: Compute regularization losses
+        # PHASE 2.5: Compute regularization losses (Tier 1 + Tier 2)
         reg_losses = {}
-        if self.enable_regularization and self.training:
-            # Orthogonality loss on semantic state
-            ortho_loss_val, ortho_info = self.ortho_loss(state.semantic_state)
-            reg_losses['orthogonality'] = ortho_loss_val
-            reg_losses['ortho_info'] = ortho_info
+        if self.training and (self.enable_regularization or self.lambda_contrastive > 0 or self.lambda_usage > 0):
+            total_reg = torch.tensor(0.0, device=logits.device)
             
-            # Variance loss on semantic state
-            var_loss_val, var_info = self.var_loss(state.semantic_state)
-            reg_losses['variance'] = var_loss_val
-            reg_losses['var_info'] = var_info
+            # TIER 1: Orthogonality and Variance
+            if self.enable_regularization:
+                # Orthogonality loss on semantic state
+                ortho_loss_val, ortho_info = self.ortho_loss(state.semantic_state)
+                reg_losses['orthogonality'] = ortho_loss_val
+                reg_losses['ortho_info'] = ortho_info
+                total_reg += self.lambda_ortho * ortho_loss_val
+                
+                # Variance loss on semantic state
+                var_loss_val, var_info = self.var_loss(state.semantic_state)
+                reg_losses['variance'] = var_loss_val
+                reg_losses['var_info'] = var_info
+                total_reg += self.lambda_var * var_loss_val
             
-            # Weighted total regularization
-            reg_losses['total_reg'] = (
-                self.lambda_ortho * ortho_loss_val +
-                self.lambda_var * var_loss_val
-            )
+            # TIER 2: Contrastive Learning
+            if self.contrastive_loss is not None:
+                contrast_loss_val, contrast_info = self.contrastive_loss(
+                    state.semantic_state,
+                    token_ids
+                )
+                reg_losses['contrastive'] = contrast_loss_val
+                reg_losses['contrast_info'] = contrast_info
+                total_reg += self.lambda_contrastive * contrast_loss_val
+            
+            # TIER 2: Block Usage Balancing
+            if self.usage_balance is not None:
+                usage_loss_val, usage_info = self.usage_balance(state.semantic_state)
+                reg_losses['usage'] = usage_loss_val
+                reg_losses['usage_info'] = usage_info
+                total_reg += self.lambda_usage * usage_loss_val
+            
+            reg_losses['total_reg'] = total_reg
         else:
             reg_losses['total_reg'] = torch.tensor(0.0, device=logits.device)
         
