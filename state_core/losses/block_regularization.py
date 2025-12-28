@@ -62,33 +62,33 @@ class OrthogonalityLoss(nn.Module):
         # Reshape to separate blocks: [B, T, num_blocks, 4]
         blocks = semantic_state.view(B, T, num_blocks, 4)
         
-        # Flatten spatial dimensions: [B*T, 16, 4]
-        blocks_flat = blocks.reshape(-1, 16, 4)
+        # Flatten spatial dimensions: [B*T, num_blocks, 4]
+        blocks_flat = blocks.reshape(-1, num_blocks, 4)
         
-        # Average across batch and time to get prototype directions: [16, 4]
-        # Then flatten to [16, 4] → but we want [16, 64] for full orthogonality
+        # Average across batch and time to get prototype directions: [num_blocks, 4]
+        # Then flatten to [num_blocks, 4] → but we want [num_blocks, 64] for full orthogonality
         # So we'll work with flattened blocks per token
         
         # Alternative: Compute cross-correlation matrix directly
-        # Flatten blocks to [B*T, 64]
-        z = semantic_state.reshape(-1, 64)  # [B*T, 64]
+        # Flatten blocks to [B*T, D]
+        z = semantic_state.reshape(-1, D)  # [B*T, D]
         
-        # Reshape to [B*T, 16, 4]
-        z_blocks = z.reshape(-1, 16, 4)
+        # Reshape to [B*T, num_blocks, 4]
+        z_blocks = z.reshape(-1, num_blocks, 4)
         
-        # Flatten each block: [B*T, 16*4] = [B*T, 64] - we want per-block vectors
+        # Flatten each block: [B*T, num_blocks*4] = [B*T, D] - we want per-block vectors
         # Let's work with the block structure directly
         
         # For orthogonality, we want blocks to be uncorrelated
-        # Compute correlation matrix between the 16 blocks
-        # Each block is 4D, so we have 16 vectors of 4D each
+        # Compute correlation matrix between the num_blocks blocks
+        # Each block is 4D, so we have num_blocks vectors of 4D each
         
-        # Flatten to [N, 16, 4] where N = B*T
+        # Flatten to [N, num_blocks, 4] where N = B*T
         N = B * T
-        z_blocks = semantic_state.reshape(N, 16, 4)  # [N, 16, 4]
+        z_blocks = semantic_state.reshape(N, num_blocks, 4)  # [N, num_blocks, 4]
         
-        # Compute mean per block: [16, 4]
-        block_means = z_blocks.mean(dim=0)  # [16, 4]
+        # Compute mean per block: [num_blocks, 4]
+        block_means = z_blocks.mean(dim=0)  # [num_blocks, 4]
         
         # Center: [N, 16, 4]
         z_centered = z_blocks - block_means.unsqueeze(0)
@@ -176,7 +176,7 @@ class VarianceLoss(nn.Module):
         z = semantic_state.reshape(-1, D)
         
         # Compute standard deviation per dimension: [D]
-        std_per_dim = torch.sqrt(z.var(dim=0) + self.eps)  # [64]
+        std_per_dim = torch.sqrt(z.var(dim=0) + self.eps)  # [D]
         
         # Hinge loss: penalize if std < target_std
         hinge = torch.clamp(self.target_std - std_per_dim, min=0.0)
