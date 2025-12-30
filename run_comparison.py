@@ -22,6 +22,7 @@ from tqdm import tqdm
 from state_core import StateCorePipeline
 from baseline_transformer import BaselineTransformer
 from multi_dataset_loader import create_multi_dataset_loaders
+from generation_tests import run_generation_tests
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -198,10 +199,38 @@ def run_comparison(epochs=2, batch_size=64, max_samples=50000):
     with open(results_dir / 'comparison_final.json', 'w') as f:
         json.dump(results, f, indent=2)
     
+    # Save trained models
+    print(f"\n{'='*70}")
+    print("SAVING MODELS")
+    print(f"{'='*70}")
+    
+    torch.save({
+        'model_state_dict': sosm.state_dict(),
+        'config': sosm_config,
+        'vocab_size': sosm.vocab_size
+    }, results_dir / 'sosm_final.pt')
+    print(f"✅ SOSM saved to: results/sosm_final.pt")
+    
+    torch.save({
+        'model_state_dict': baseline.state_dict(),
+        'vocab_size': baseline.vocab_size,
+        'd_model': baseline.d_model,
+        'n_layers': baseline.n_layers
+    }, results_dir / 'baseline_final.pt')
+    print(f"✅ Baseline saved to: results/baseline_final.pt")
+    
+    # Run generation tests
+    print(f"\n{'='*70}")
+    print("RUNNING GENERATION TESTS")
+    print(f"{'='*70}")
+    generation_results = run_generation_tests(sosm, baseline, tokenizer, save_dir=results_dir)
+    
     print(f"\n{'='*70}")
     print("COMPARISON COMPLETE")
     print(f"{'='*70}")
     print(f"Results saved to: results/comparison_final.json")
+    print(f"Models saved to: results/sosm_final.pt, results/baseline_final.pt")
+    print(f"Generation tests saved to: results/generation_tests.json")
     
     # Print summary
     print("\nFINAL PERPLEXITY SUMMARY:")
