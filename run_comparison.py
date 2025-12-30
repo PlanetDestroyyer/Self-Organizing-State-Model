@@ -90,7 +90,7 @@ def evaluate(model, test_loader, is_sosm=True):
     return avg_loss, perplexity
 
 
-def run_comparison(epochs=2, batch_size=64, max_samples=50000):
+def run_comparison(epochs=7, batch_size=64, max_samples=50000):
     """Run full comparison experiment"""
     
     print("="*70)
@@ -248,4 +248,4 @@ def run_comparison(epochs=2, batch_size=64, max_samples=50000):
 
 
 if __name__ == "__main__":
-    results = run_comparison(epochs=2, batch_size=64, max_samples=50000)  # Reduced to fit 8-hour budget
+    results = run_comparison(epochs=7, batch_size=64, max_samples=50000)  # 7 epochs fits 10h budget (2 epochs = 1.33h)
