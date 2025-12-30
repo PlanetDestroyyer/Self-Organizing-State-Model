@@ -44,8 +44,8 @@ def train_epoch(model, train_loader, optimizer, scaler, is_sosm=True):
                 logits, state = model(input_ids, return_state=True)
                 # Add regularization loss if available
                 loss = F.cross_entropy(logits.view(-1, model.vocab_size), labels.view(-1), ignore_index=-100)
-                if state is not None and 'reg_losses' in state:
-                    loss = loss + state['reg_losses']['total_reg']
+                if state is not None and hasattr(state, 'reg_losses'):
+                    loss = loss + state.reg_losses['total_reg']
             else:
                 logits = model(input_ids)
                 loss = F.cross_entropy(logits.view(-1, model.vocab_size), labels.view(-1), ignore_index=-100)
@@ -111,7 +111,7 @@ def run_comparison(epochs=5, batch_size=64, max_samples=50000):
         tokenizer,
         batch_size=batch_size,
         max_samples_per_dataset=max_samples,
-        max_length=256
+        max_length=128  # Reduced to avoid sequence length errors
     )
     
     # Create models
