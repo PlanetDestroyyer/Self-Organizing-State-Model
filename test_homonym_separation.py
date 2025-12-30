@@ -276,7 +276,7 @@ if __name__ == '__main__':
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
     # Load checkpoint
-    checkpoint_path = 'sosm_trained.pt'
+    checkpoint_path = 'results/sosm_final.pt'
     print(f"Loading checkpoint: {checkpoint_path}")
     
     try:
