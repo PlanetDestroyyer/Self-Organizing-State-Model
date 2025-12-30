@@ -52,18 +52,18 @@ class TextDataset(Dataset):
 
 
 def load_simple_wikipedia(split: str = 'train', max_samples: int = 50000) -> List[str]:
-    """Load Simple Wikipedia dataset using sosm_data approach"""
+    """Load Simple Wikipedia using Parquet format (not deprecated scripts)"""
     print(f"Loading Simple Wikipedia ({split})...")
     
-    # Use same approach as sosm_data.py (which works!)
-    dataset = load_dataset('wikipedia', '20220301.simple', split=split, trust_remote_code=True)
+    # Use wikimedia/wikipedia (Parquet-based, not script-based)
+    dataset = load_dataset('wikimedia/wikipedia', '20231101.simple', split=split)
     
     # Sample and filter
     if len(dataset) > max_samples:
         indices = random.sample(range(len(dataset)), max_samples)
         dataset = dataset.select(indices)
     
-    # Extract text and filter short articles
+    # Extract text and filter short articles  
     texts = []
     for item in dataset:
         text = item['text']
