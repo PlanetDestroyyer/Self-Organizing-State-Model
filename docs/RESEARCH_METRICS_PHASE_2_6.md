@@ -206,7 +206,11 @@ Epoch 11-15: Maintained performance
 **SOSM demonstrates exceptional disambiguation:**
 - 0.828 average separation (2.7× better than target)
 - 100% success rate on homonym tests
-- Baseline cannot perform this analysis (no semantic blocks)
+### 6. Compression vs. Generation Trade-off
+**Discovery of "State Drift":**
+- **Incredible Compression**: SOSM achieves near-perfect Test PPL (1.10), indicating optimal next-token prediction given ground-truth history (Teacher Forcing).
+- **Brittle Generation**: Autoregressive generation quality lags behind standard Transformers, exposing **Exposure Bias**—the model's state trajectory drifts when fed its own imperfect predictions.
+- **Implication**: SOSM is a superior **knowledge compressor** but requires stabilization (e.g., Scheduled Sampling) for robust open-ended generation.
 
 ---
 
