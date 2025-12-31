@@ -311,8 +311,7 @@ def train_robust_sosm(epochs=5, batch_size=64, max_samples=50000, k_schedule=200
         max_samples_per_dataset=max_samples,
         max_length=128
     )
-    train_loader = loaders['wiki']['train']
-    test_loader = loaders['wiki']['test']
+    train_loader, test_loader = loaders['simple_wiki']  # Unpack tuple
     
     # Create SOSM model (load from Phase 2.6 checkpoint if exists)
     print("\nInitializing SOSM model...")
