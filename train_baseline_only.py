@@ -73,13 +73,55 @@ def evaluate(model, test_loader):
     return avg_loss, perplexity
 
 
-def generate_examples(model, tokenizer, prompts, domain_name, max_length=200, num_examples=12):
-    """Generate text examples for qualitative evaluation"""
+def nucleus_sampling(logits, temperature=0.8, top_p=0.95):
+    """Industry-standard nucleus sampling (used by GPT-4, Claude, LLaMA)"""
+    # Apply temperature
+    logits = logits / temperature
+    
+    # Convert to probabilities
+    probs = F.softmax(logits, dim=-1)
+    
+    # Sort probabilities
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+    
+    # Compute cumulative probabilities
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+    
+    # Remove tokens with cumulative probability above threshold
+    sorted_indices_to_remove = cumulative_probs > top_p
+    
+    # Shift to keep first token above threshold
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
+    
+    # Set removed indices to very low probability
+    sorted_probs[sorted_indices_to_remove] = 0.0
+    
+    # Renormalize
+    sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)
+    
+    # Sample from the filtered distribution
+    next_token = torch.multinomial(sorted_probs, num_samples=1)
+    
+    # Map back to original indices
+    next_token = torch.gather(sorted_indices, -1, next_token)
+    
+    return next_token
+
+
+def generate_examples(model, tokenizer, prompts, domain_name, max_length=200, num_examples=12, temperature=0.8, top_p=0.95):
+    """Generate text examples using industry-standard nucleus sampling
+    
+    Args:
+        temperature: 0.8 (balanced), 0.7 (more focused), 0.9 (more creative)
+        top_p: 0.95 (standard for GPT-4/Claude)
+    """
     model.eval()
     results = []
     
     print(f"\n{'='*70}")
     print(f"GENERATING {domain_name.upper()} EXAMPLES (BASELINE)")
+    print(f"Sampling: Nucleus (top-p={top_p}, temp={temperature}) - Industry Standard")
     print(f"{'='*70}\n")
     
     with torch.no_grad():
@@ -87,7 +129,7 @@ def generate_examples(model, tokenizer, prompts, domain_name, max_length=200, nu
             # Tokenize prompt
             input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
             
-            # Generate
+            # Generate with nucleus sampling
             generated = input_ids.clone()
             for _ in range(max_length):
                 if generated.shape[1] >= 512:  # Max sequence length
@@ -95,7 +137,9 @@ def generate_examples(model, tokenizer, prompts, domain_name, max_length=200, nu
                     
                 logits = model(generated)
                 next_token_logits = logits[:, -1, :]
-                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                
+                # Use nucleus sampling instead of greedy
+                next_token = nucleus_sampling(next_token_logits, temperature, top_p)
                 generated = torch.cat([generated, next_token], dim=1)
                 
                 # Stop at EOS
