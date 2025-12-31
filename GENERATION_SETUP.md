@@ -14,7 +14,10 @@ Both `train_sosm_only.py` and `train_baseline_only.py` now include comprehensive
 - **Max Length**: 200 tokens per generation
 - **Examples per Domain**: 12 (can be adjusted via `num_examples` parameter)
 - **Total Examples per Model**: 36 (12 per domain × 3 domains)
-- **Method**: Greedy decoding (argmax) for reproducibility
+- **Method**: Nucleus Sampling (top-p) + Temperature - **Industry Standard**
+  - **temperature**: 0.8 (balanced, same as GPT-4/Claude)
+  - **top_p**: 0.95 (nucleus sampling threshold)
+  - Matches modern LLM generation quality
 
 ## Domain-Specific Prompts
 
