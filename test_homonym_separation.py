@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from transformers import GPT2Tokenizer
 from state_core.pipeline import StateCorePipeline
 from collections import defaultdict
+from pathlib import Path
 import numpy as np
 
 
@@ -268,16 +269,29 @@ def run_homonym_needle_test(pipeline, tokenizer, device='cuda'):
 
 if __name__ == '__main__':
     import sys
+    from pathlib import Path
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}\n")
+    print(f"Device: {device}")
+    print()
     
     # Load tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
-    # Load checkpoint
-    checkpoint_path = 'results/sosm_final.pt'
+    # Updated checkpoint path to match train_sosm_only.py output
+    checkpoint_path = 'results/sosm_trained.pt'
     print(f"Loading checkpoint: {checkpoint_path}")
+    
+    # Check if checkpoint exists
+    if not torch.cuda.is_available() or not Path(checkpoint_path).exists():
+        print(f"❌ Checkpoint not found: {checkpoint_path}")
+        print()
+        print("Please run one of the following first:")
+        print("  1. python train_sosm_only.py  (trains SOSM for 15 epochs)")
+        print("  2. python test_sosm.py         (trains SOSM and saves checkpoint)")
+        print()
+        print(f"This will create the checkpoint at: {checkpoint_path}")
+        sys.exit(1)
     
     try:
         checkpoint = torch.load(checkpoint_path)

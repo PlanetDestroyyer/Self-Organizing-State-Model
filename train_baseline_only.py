@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 from baseline_transformer import BaselineTransformer
 from multi_dataset_loader import create_multi_dataset_loaders
+from generation_prompts import WIKI_PROMPTS, CODE_PROMPTS, ARXIV_PROMPTS
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -70,6 +71,52 @@ def evaluate(model, test_loader):
     perplexity = torch.exp(torch.tensor(avg_loss)).item()
     
     return avg_loss, perplexity
+
+
+def generate_examples(model, tokenizer, prompts, domain_name, max_length=200, num_examples=12):
+    """Generate text examples for qualitative evaluation"""
+    model.eval()
+    results = []
+    
+    print(f"\n{'='*70}")
+    print(f"GENERATING {domain_name.upper()} EXAMPLES (BASELINE)")
+    print(f"{'='*70}\n")
+    
+    with torch.no_grad():
+        for i, prompt in enumerate(prompts[:num_examples]):
+            # Tokenize prompt
+            input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
+            
+            # Generate
+            generated = input_ids.clone()
+            for _ in range(max_length):
+                if generated.shape[1] >= 512:  # Max sequence length
+                    break
+                    
+                logits = model(generated)
+                next_token_logits = logits[:, -1, :]
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                generated = torch.cat([generated, next_token], dim=1)
+                
+                # Stop at EOS
+                if next_token.item() == tokenizer.eos_token_id:
+                    break
+            
+            # Decode
+            generated_text = tokenizer.decode(generated[0], skip_special_tokens=True)
+            
+            print(f"Example {i+1}:")
+            print(f"Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"Prompt: {prompt}")
+            print(f"Generated: {generated_text[:500]}..." if len(generated_text) > 500 else f"Generated: {generated_text}")
+            print("-" * 70)
+            
+            results.append({
+                'prompt': prompt,
+                'generated': generated_text,
+                'length': len(generated_text)
+            })
+    
+    return results
 
 
 def train_baseline(epochs=30, batch_size=64, max_samples=50000):
@@ -140,6 +187,22 @@ def train_baseline(epochs=30, batch_size=64, max_samples=50000):
                 'perplexity': ppl,
                 'time': elapsed
             })
+        
+        # Generate examples after training on this dataset
+        print(f"\n{'='*70}")
+        print(f"GENERATING EXAMPLES FOR {dataset_name.upper()}")
+        print(f"{'='*70}")
+        
+        if dataset_name == 'simple_wiki':
+            gen_results = generate_examples(baseline, tokenizer, WIKI_PROMPTS, "Wikipedia Text")
+        elif dataset_name == 'code':
+            gen_results = generate_examples(baseline, tokenizer, CODE_PROMPTS, "Python Code")
+        elif dataset_name == 'arxiv':
+            gen_results = generate_examples(baseline, tokenizer, ARXIV_PROMPTS, "ArXiv Articles")
+        
+        results['datasets'][dataset_name].append({
+            'generation_examples': gen_results
+        })
         
         # Reset model for next dataset
         baseline = BaselineTransformer().to(device)
