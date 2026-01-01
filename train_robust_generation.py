@@ -279,7 +279,7 @@ def generate_stability_test(model, tokenizer, prompt, max_length=100,
         }
 
 
-def train_robust_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedule=2000):
+def train_robust_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedule=500):
     """
     Phase 2.7: Train SOSM with Input Corruption.
     
@@ -439,7 +439,7 @@ if __name__ == '__main__':
         epochs=10,
         batch_size=64,
         max_samples=50000,
-        k_schedule=2000
+        k_schedule=500
     )
     
     print("\n" + "="*70)
