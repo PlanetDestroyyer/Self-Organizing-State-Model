@@ -185,6 +185,59 @@ def evaluate_word_level(model, test_loader, vocab_size):
     return avg_loss, perplexity
 
 
+def generate_word_level(model, tokenizer, prompt, max_length=100, temperature=0.8, top_p=0.95):
+    """Generate text using word-level tokenizer."""
+    model.eval()
+    
+    with torch.no_grad():
+        input_ids = tokenizer.encode(prompt, add_special_tokens=True)
+        input_ids = torch.tensor([input_ids], dtype=torch.long).to(device)
+        generated = input_ids.clone()
+        
+        for _ in range(max_length):
+            if generated.shape[1] >= 512:
+                break
+            
+            logits, _ = model(generated, return_state=True)
+            next_token_logits = logits[:, -1, :]
+            
+            probs = F.softmax(next_token_logits / temperature, dim=-1)
+            sorted_probs, sorted_idx = torch.sort(probs, descending=True, dim=-1)
+            cumsum = torch.cumsum(sorted_probs, dim=-1)
+            mask = cumsum <= top_p
+            mask[..., 0] = True
+            filtered_probs = sorted_probs * mask.float()
+            filtered_probs = filtered_probs / filtered_probs.sum(dim=-1, keepdim=True)
+            next_token_idx = torch.multinomial(filtered_probs, 1)
+            next_token = torch.gather(sorted_idx, -1, next_token_idx)
+            
+            generated = torch.cat([generated, next_token], dim=1)
+            
+            if next_token.item() == tokenizer.eos_token_id:
+                break
+        
+        text = tokenizer.decode(generated[0].tolist(), skip_special_tokens=True)
+        tokens = generated[0].tolist()
+        
+        unique_tokens = len(set(tokens))
+        total_tokens = len(tokens)
+        unique_ratio = unique_tokens / total_tokens if total_tokens > 0 else 0
+        
+        repetitions = 0
+        for i in range(len(tokens) - 6):
+            if tokens[i:i+3] == tokens[i+3:i+6]:
+                repetitions += 1
+        repetition_rate = repetitions / max(1, len(tokens) - 6)
+        
+        return {
+            'text': text,
+            'length': len(text),
+            'num_tokens': total_tokens,
+            'unique_ratio': unique_ratio,
+            'repetition_rate': repetition_rate
+        }
+
+
 def train_word_level_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedule=500):
     """
     Train SOSM with word-level tokenization.
@@ -259,7 +312,7 @@ def train_word_level_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedul
         # Generation test
         print(f"\n📝 Generation Test (Epoch {epoch+1}):")
         test_prompt = WIKI_PROMPTS[0]
-        gen_result = generate_stability_test(model, tokenizer, test_prompt)
+        gen_result = generate_word_level(model, tokenizer, test_prompt)
         
         print(f"  Prompt: {test_prompt}")
         print(f"  Generated: {gen_result['text'][:200]}...")
@@ -290,7 +343,7 @@ def train_word_level_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedul
     print(f"{'='*70}\n")
     
     for i, prompt in enumerate(WIKI_PROMPTS[:3]):
-        gen_result = generate_stability_test(model, tokenizer, prompt, max_length=100)
+        gen_result = generate_word_level(model, tokenizer, prompt, max_length=100)
         results['generation_samples'].append(gen_result)
         
         print(f"Sample {i+1}:")
