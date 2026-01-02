@@ -323,7 +323,7 @@ def train_word_level_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedul
 if __name__ == '__main__':
     results = train_word_level_sosm(
         epochs=10,
-        batch_size=64,
+        batch_size=32,  # Reduced from 64 due to larger vocab (188M params)
         max_samples=50000,
         k_schedule=500
     )
