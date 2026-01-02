@@ -225,12 +225,12 @@ def train_word_level_sosm(epochs=10, batch_size=64, max_samples=50000, k_schedul
     with open('configs/tier1.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Update vocab size
-    config['vocab_size'] = vocab_size
+    # Update vocab size in the correct nested location
+    config['components']['mu']['vocab_size'] = vocab_size
     
     model = StateCorePipeline(config).to(device)
     print(f"  SOSM params: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"  Vocab size: {vocab_size}")
+    print(f"  Configured vocab size: {vocab_size}")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
     scaler = GradScaler()
