@@ -29,6 +29,8 @@ class WordLevelTokenizer:
     UNK_TOKEN = "[UNK]"
     BOS_TOKEN = "[BOS]"
     EOS_TOKEN = "[EOS]"
+    THINK_START = "<think>"
+    THINK_END = "</think>"
     
     def __init__(self):
         self.word2id: Dict[str, int] = {}
@@ -44,7 +46,9 @@ class WordLevelTokenizer:
             self.PAD_TOKEN,
             self.UNK_TOKEN,
             self.BOS_TOKEN,
-            self.EOS_TOKEN
+            self.EOS_TOKEN,
+            self.THINK_START,  # CoT start
+            self.THINK_END      # CoT end
         ]
         for token in special_tokens:
             self.word2id[token] = len(self.word2id)
@@ -55,6 +59,8 @@ class WordLevelTokenizer:
         self.unk_token_id = self.word2id[self.UNK_TOKEN]
         self.bos_token_id = self.word2id[self.BOS_TOKEN]
         self.eos_token_id = self.word2id[self.EOS_TOKEN]
+        self.think_start_id = self.word2id[self.THINK_START]
+        self.think_end_id = self.word2id[self.THINK_END]
     
     def _tokenize_text(self, text: str) -> List[str]:
         """
@@ -187,6 +193,8 @@ class WordLevelTokenizer:
         self.unk_token_id = self.word2id[self.UNK_TOKEN]
         self.bos_token_id = self.word2id[self.BOS_TOKEN]
         self.eos_token_id = self.word2id[self.EOS_TOKEN]
+        self.think_start_id = self.word2id.get(self.THINK_START, self.unk_token_id)
+        self.think_end_id = self.word2id.get(self.THINK_END, self.unk_token_id)
         
         print(f"Loaded tokenizer from {filepath} (vocab_size={self.vocab_size})")
 
